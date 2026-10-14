@@ -260,6 +260,18 @@ window.__ModuleLoader__.load({
       const [limitStatus, setLimitStatus] = React.useState('');
 
       const injection = (data && data.injection) || null;
+      /*
+       * A page refresh picks up this Client bundle before the Host process restarts, so
+       * for a moment the Host is the older build and the newer accounting fields are
+       * simply absent. Normalising here keeps the field from rendering the string
+       * "undefined" in that window — and costs nothing once the two match.
+       */
+      const customLimit = injection === null || injection.errorLimitCustom === undefined
+        ? null
+        : injection.errorLimitCustom;
+      const defaultLimit = injection === null
+        ? 10
+        : (injection.errorLimitDefault === undefined ? injection.errorLimit : injection.errorLimitDefault);
       /** Host-declared bounds, so the field cannot drift from what the assembler allows. */
       const bounds = (data && data.limitBounds) || { min: 0, max: 200 };
 
@@ -376,16 +388,16 @@ window.__ModuleLoader__.load({
                 onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); commitLimit(); } },
               }),
               h('button', { type: 'button', className: 'pd-primary', onClick: commitLimit }, '保存'),
-              injection.errorLimitCustom === null ? null : h('button', {
+              injection.errorLimitCustom === null || injection.errorLimitCustom === undefined ? null : h('button', {
                 type: 'button', className: 'pd-ghost',
                 onClick: () => save({ injectLimit: null }),
               }, '恢复默认'),
               limitStatus ? h('span', { className: 'pd-note' }, limitStatus) : null),
             h('div', { className: 'pd-err-date' },
-              `默认 ${injection.errorLimitDefault} 条`
-              + (injection.errorLimitCustom === null
+              `默认 ${defaultLimit} 条`
+              + (customLimit === null
                 ? '，当前跟随默认。'
-                : `，当前为自定义的 ${injection.errorLimitCustom} 条。`)
+                : `，当前为自定义的 ${customLimit} 条。`)
               + `条数越多，每轮请求注入的 token 越多，消耗随之增加；填 0 则完全不注入，上限 ${bounds.max}。`
               + '清空输入框并保存 = 恢复跟随默认。')),
 
