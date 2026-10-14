@@ -255,6 +255,46 @@ window.__ModuleLoader__.load({
       const { data, error, save } = useDeskData(open);
       const [type, setType] = React.useState('');
       const [lesson, setLesson] = React.useState('');
+      /** Draft text of the cap field; committed explicitly so a half-typed number is never written. */
+      const [limitDraft, setLimitDraft] = React.useState('');
+      const [limitStatus, setLimitStatus] = React.useState('');
+
+      const injection = (data && data.injection) || null;
+      /** Host-declared bounds, so the field cannot drift from what the assembler allows. */
+      const bounds = (data && data.limitBounds) || { min: 0, max: 200 };
+
+      // Seed the field from the value actually in force, so what the user reads there
+      // is what the prompt assembler is using — not what they last typed.
+      React.useEffect(() => {
+        if (injection === null) return;
+        setLimitDraft(String(injection.errorLimit));
+      }, [data]);
+
+      /**
+       * Write the field's value to the Host.
+       *
+       * An emptied field means "follow the plugin config again": the Host stores that
+       * as `null`, which is also what the 恢复默认 button sends. Everything else goes
+       * over as a number; the Host clamps and re-validates, so this side only has to
+       * avoid sending obvious garbage.
+       */
+      const commitLimit = () => {
+        if (injection === null) return;
+        const raw = limitDraft.trim();
+        if (raw === '') {
+          setLimitStatus('保存中…');
+          save({ injectLimit: null }).then((next) => setLimitStatus(next === null ? '保存失败' : '已恢复默认'));
+          return;
+        }
+        const next = Number(raw);
+        if (!Number.isFinite(next) || next < 0) {
+          setLimitDraft(String(injection.errorLimit));
+          setLimitStatus('只接受 0 或正整数');
+          return;
+        }
+        setLimitStatus('保存中…');
+        save({ injectLimit: next }).then((saved) => setLimitStatus(saved === null ? '保存失败' : '已保存'));
+      };
 
       const add = () => {
         if (type.trim() === '' && lesson.trim() === '') return;
@@ -305,14 +345,50 @@ window.__ModuleLoader__.load({
           // reaching the model" — the second is the whole point, and without a readout
           // a user cannot tell the two apart. The effective limit is printed too: it is
           // a setting now, and a number the user cannot see is one they cannot tune.
-          data && data.injection && errors.length > 0 ? h('div', {
+          injection !== null && errors.length > 0 ? h('div', {
             className: 'pd-note', style: { marginTop: '10px' },
           },
-            data.injection.errorsInjected === data.injection.errorsTotal
-              ? `已注入全部 ${data.injection.errorsInjected} 条（下一轮对话生效）`
-              : `已注入最近 ${data.injection.errorsInjected} 条，共 ${data.injection.errorsTotal} 条（下一轮对话生效）`,
+            injection.errorsInjected === injection.errorsTotal
+              ? `已注入全部 ${injection.errorsInjected} 条（下一轮对话生效）`
+              : `已注入最近 ${injection.errorsInjected} 条，共 ${injection.errorsTotal} 条（下一轮对话生效）`) : null,
+          /*
+           * The cap is editable here, not only in Settings: it is the number that
+           * decides how much of this library reaches the model, and the person who
+           * decides it is looking at the library. Keeping the field inside the panel
+           * makes that connection impossible to miss.
+           *
+           * The bounds and the default come from the Host, so the field cannot drift
+           * from what the prompt assembler actually enforces.
+           */
+          injection === null ? null : h(React.Fragment, null,
+            h('label', { className: 'pd-label' }, '注入条数上限'),
+            h('div', { className: 'pd-row' },
+              h('input', {
+                className: 'pd-area',
+                style: { minHeight: 'auto', flex: '0 0 96px', width: '96px' },
+                type: 'number', inputMode: 'numeric',
+                min: bounds.min, max: bounds.max, step: 1,
+                value: limitDraft,
+                'aria-label': '注入条数上限',
+                // Digits only: a minus sign or a decimal point is not a count, and the
+                // Host would only have to reject it.
+                onChange: (e) => setLimitDraft(e.target.value.replace(/[^0-9]/g, '')),
+                onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); commitLimit(); } },
+              }),
+              h('button', { type: 'button', className: 'pd-primary', onClick: commitLimit }, '保存'),
+              injection.errorLimitCustom === null ? null : h('button', {
+                type: 'button', className: 'pd-ghost',
+                onClick: () => save({ injectLimit: null }),
+              }, '恢复默认'),
+              limitStatus ? h('span', { className: 'pd-note' }, limitStatus) : null),
             h('div', { className: 'pd-err-date' },
-              `上限 ${data.injection.errorLimit} 条 · 可在 设置 → 插件 → 插件配置 修改`)) : null,
+              `默认 ${injection.errorLimitDefault} 条`
+              + (injection.errorLimitCustom === null
+                ? '，当前跟随默认。'
+                : `，当前为自定义的 ${injection.errorLimitCustom} 条。`)
+              + `条数越多，每轮请求注入的 token 越多，消耗随之增加；填 0 则完全不注入，上限 ${bounds.max}。`
+              + '清空输入框并保存 = 恢复跟随默认。')),
+
           dates.map((d) => h('div', { key: d },
             h('div', { className: 'pd-label' }, d),
             byDate.get(d).map(({ e, i }) => h('div', { className: 'pd-err', key: i },
@@ -345,11 +421,46 @@ window.__ModuleLoader__.load({
     function DeskHeader(props) {
       /** `null` | 'prompt' | 'errors' — never two at once. */
       const [openPanel, setOpenPanel] = React.useState(null);
+      const wrapRef = React.useRef(null);
 
       // Clicking the open panel's own button closes it; clicking the other swaps.
       const toggle = (which) => setOpenPanel((current) => (current === which ? null : which));
 
-      return h('div', { className: 'pd-wrap' },
+      /*
+       * Clicking anywhere outside the header group closes the open panel; Escape does
+       * too. Both listeners are bound only while a panel is open, so with nothing on
+       * screen this plugin adds no document-level listeners at all.
+       *
+       * `pointerdown` covers mouse, touch and pen in one listener, and it fires before
+       * the click that a control underneath would otherwise receive. The capture phase
+       * is what makes "click outside" reliable even when the thing clicked is inside a
+       * nested handler: a bubbling listener on `document` can be pre-empted by a
+       * `stopPropagation` further down the tree.
+       *
+       * The containment test is against this wrapper, which holds the buttons *and*
+       * both panels — so pressing a button, typing in a field, dragging the panel's
+       * scrollbar, or selecting text inside it all count as "inside" and keep it open.
+       */
+      React.useEffect(() => {
+        if (openPanel === null) return undefined;
+        const onPointerDown = (event) => {
+          const wrap = wrapRef.current;
+          const target = event.target;
+          if (wrap !== null && target !== null && wrap.contains(target)) return;
+          setOpenPanel(null);
+        };
+        const onKeyDown = (event) => {
+          if (event.key === 'Escape') setOpenPanel(null);
+        };
+        document.addEventListener('pointerdown', onPointerDown, true);
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+          document.removeEventListener('pointerdown', onPointerDown, true);
+          document.removeEventListener('keydown', onKeyDown);
+        };
+      }, [openPanel]);
+
+      return h('div', { className: 'pd-wrap', ref: wrapRef },
         h(DeskButton, {
           open: openPanel === 'prompt',
           label: '提示词',

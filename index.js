@@ -127,6 +127,13 @@ function emptyState() {
     sessionPrompt: '',
     errors: [],
     ui: { showPrompt: true, showErrors: false },
+    /*
+     * The panel's own cap on injected entries, or `null` for "follow the configured
+     * default". It lives in state rather than in the config because the panel edits
+     * it directly, and this file is the one thing the plugin already owns and writes
+     * atomically — there is no risk of corrupting the profile patch that way.
+     */
+    injectLimit: null,
   };
 }
 
@@ -178,6 +185,16 @@ function sanitizeState(raw) {
     if (typeof raw.ui.showPrompt === 'boolean') out.ui.showPrompt = raw.ui.showPrompt;
     if (typeof raw.ui.showErrors === 'boolean') out.ui.showErrors = raw.ui.showErrors;
   }
+
+  /*
+   * The panel's override. Only a non-negative finite number is accepted; anything
+   * else (a string, a fraction of a line, a negative count) is dropped back to
+   * `null` rather than coerced, so a hand-edited file cannot smuggle in a value the
+   * prompt assembler would then have to guess about.
+   */
+  if (typeof raw.injectLimit === 'number' && Number.isFinite(raw.injectLimit) && raw.injectLimit >= 0) {
+    out.injectLimit = Math.min(MAX_INJECT_LIMIT, Math.trunc(raw.injectLimit));
+  }
   return out;
 }
 
@@ -209,11 +226,26 @@ function normalizeInjectLimit(value) {
   return Math.min(MAX_INJECT_LIMIT, Math.trunc(n));
 }
 
+/**
+ * The cap actually in force for a given state.
+ *
+ * Two places can carry a number, so the precedence has to be stated once and only
+ * once: **the panel's own value wins when it is set, otherwise the configured
+ * default applies.** The panel is where a user tunes this while looking at their
+ * library, so an explicit choice made there must not be silently overridden by a
+ * `config:` block they set earlier; clearing the field in the panel puts it back on
+ * the configured default, which is how the two stay reconcilable.
+ */
+function effectiveInjectLimit(state, configLimit) {
+  return state.injectLimit === null ? configLimit : normalizeInjectLimit(state.injectLimit);
+}
+
 /** The full payload the Client renders. */
-function currentState(injectLimit) {
+function currentState(configLimit) {
   const state = loadState();
   const hasSession = state.sessionPrompt.trim() !== '';
-  const injected = injectLimit <= 0 ? 0 : Math.min(state.errors.length, injectLimit);
+  const limit = effectiveInjectLimit(state, configLimit);
+  const injected = limit <= 0 ? 0 : Math.min(state.errors.length, limit);
   return {
     // The global prompt is the harness's own AGENTS.md, read fresh every time so
     // an edit made in a text editor shows up on the next panel open.
@@ -229,15 +261,19 @@ function currentState(injectLimit) {
      * for itself it would have to duplicate the limit, and the two copies would
      * drift the moment the limit changes — the panel would then confidently report
      * a number that the prompt assembler does not agree with. One source, projected
-     * to the Client, including the limit that is actually in force.
+     * to the Client, including the limit that is actually in force and where that
+     * number came from, so the field in the panel can show its own state.
      */
     injection: {
       sessionPromptActive: hasSession,
       globalPromptActive: (readTextFile(globalPromptPath(), '')).trim() !== '',
       errorsInjected: injected,
       errorsTotal: state.errors.length,
-      errorLimit: injectLimit,
+      errorLimit: limit,
+      errorLimitDefault: configLimit,
+      errorLimitCustom: state.injectLimit,
     },
+    limitBounds: { min: 0, max: MAX_INJECT_LIMIT },
   };
 }
 
@@ -252,17 +288,20 @@ function currentState(injectLimit) {
  *   · **Newest first** — a fresh mistake is more likely to recur than an old one,
  *     so when the limit truncates, the oldest entries are the ones dropped.
  *
- * `injectLimit` is the configured cap: the library exists to save tokens, so it
- * must not become a token sink, and a user who logs every slip for a year would
- * otherwise carry hundreds of lines into every request. Only the most recent slice
- * is injected; the full list stays readable in the panel. A limit of `0` injects
- * no entries at all (`slice(-0)` would mean "everything", so this is checked).
+ * `configLimit` is the configured default cap; the value actually used is resolved
+ * per call from the state, because the panel can override it while the harness runs.
+ * The library exists to save tokens, so it must not become a token sink, and a user
+ * who logs every slip for a year would otherwise carry hundreds of lines into every
+ * request. Only the most recent slice is injected; the full list stays readable in
+ * the panel. A limit of `0` injects no entries at all (`slice(-0)` would mean
+ * "everything", so this is checked).
  *
  * Returns `''` when there is nothing to say. An empty section is skipped by the
  * assembler, so a user with no prompt and no errors pays nothing.
  */
-function buildPromptText(injectLimit) {
+function buildPromptText(configLimit) {
   const state = loadState();
+  const injectLimit = effectiveInjectLimit(state, configLimit);
   const parts = [];
 
   const session = state.sessionPrompt.trim();
@@ -324,7 +363,7 @@ function sendJson(res, status, payload) {
  * Only these keys are accepted — an unknown key is ignored rather than written,
  * so a stale Client cannot inject arbitrary fields into the file.
  */
-function applyPatch(patch, injectLimit) {
+function applyPatch(patch, configLimit) {
   const state = loadState();
   if (patch !== null && typeof patch === 'object') {
     if (typeof patch.sessionPrompt === 'string') state.sessionPrompt = patch.sessionPrompt;
@@ -336,9 +375,23 @@ function applyPatch(patch, injectLimit) {
       if (typeof patch.ui.showPrompt === 'boolean') state.ui.showPrompt = patch.ui.showPrompt;
       if (typeof patch.ui.showErrors === 'boolean') state.ui.showErrors = patch.ui.showErrors;
     }
+    /*
+     * The panel's cap. `null` (or the empty string an emptied number field sends)
+     * means "follow the configured default", which is what clearing the field does.
+     * Garbage is ignored rather than written: the stored value stays what it was,
+     * so a typo in the field cannot silently disable the injection.
+     */
+    if (patch.injectLimit === null || patch.injectLimit === '') {
+      state.injectLimit = null;
+    } else if (typeof patch.injectLimit === 'number' || typeof patch.injectLimit === 'string') {
+      const n = Number(patch.injectLimit);
+      if (Number.isFinite(n) && n >= 0) {
+        state.injectLimit = Math.min(MAX_INJECT_LIMIT, Math.trunc(n));
+      }
+    }
   }
   saveState(state);
-  return currentState(injectLimit);
+  return currentState(configLimit);
 }
 
 /** Cordis plugin name (also the Loader row id in cordis.patch.yml). */
@@ -359,14 +412,18 @@ export const name = 'prompt-desk';
  */
 export function apply(ctx, config) {
   /*
-   * Resolve the configured limit once, here.
+   * Resolve the *configured default* cap once, here.
    *
    * `config` is this row's `config:` block from the Loader, already shaped by the
    * `Config` schema above (so a profile that sets nothing still sees the default).
    * Validating it once means neither prompt assembly nor the HTTP route has to
    * re-validate a hand-edited YAML value on every call.
+   *
+   * This is only the fallback: the panel can override it at runtime, and the
+   * override lives in the state file, so the value in force is resolved per call
+   * (`effectiveInjectLimit`) rather than frozen here.
    */
-  const injectLimit = normalizeInjectLimit(config?.injectLimit);
+  const configLimit = normalizeInjectLimit(config?.injectLimit);
 
   /*
    * Prompt injection — the whole point of the plugin.
@@ -396,7 +453,7 @@ export function apply(ctx, config) {
       order: 10200,
       text: () => {
         try {
-          return buildPromptText(injectLimit);
+          return buildPromptText(configLimit);
         } catch {
           // A malformed state file must never break prompt assembly for the turn.
           return '';
@@ -419,7 +476,7 @@ export function apply(ctx, config) {
 
           if (method === 'GET') {
             try {
-              sendJson(res, 200, currentState(injectLimit));
+              sendJson(res, 200, currentState(configLimit));
             } catch (error) {
               sendJson(res, 500, { error: String(error && error.message ? error.message : error) });
             }
@@ -442,7 +499,7 @@ export function apply(ctx, config) {
                 return;
               }
               try {
-                sendJson(res, 200, applyPatch(patch, injectLimit));
+                sendJson(res, 200, applyPatch(patch, configLimit));
               } catch (error) {
                 sendJson(res, 500, { error: String(error && error.message ? error.message : error) });
               }

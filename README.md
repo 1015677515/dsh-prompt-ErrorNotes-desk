@@ -17,6 +17,8 @@
 
 第二个面板的意义：一个反复犯同类错误的 agent，会在自己的上下文里收到一份简短的、带日期的提醒，成本远低于重新踩一遍坑再发现。
 
+两个面板互斥，**点面板以外的空白处会自动关闭**（按 Esc 也可以）。
+
 ## 安装
 
 本插件目前只发布在 GitHub（未发布到 npm）。
@@ -95,11 +97,15 @@ A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
 
 ### 注入条数可以自己设
 
+**在错误库面板里直接填**（最方便）：面板里有一个「注入条数上限」输入框，填好点「保存」即可，下一轮对话生效。
+
 | 字段 | 默认 | 含义 |
 |---|---|---|
-| `injectLimit` | `10` | 注入系统提示词的错误经验条数上限。`0` = 一条都不注入（会话提示词不受影响）；最大 `200`，写更大也会被夹到 200 |
+| `injectLimit` | `10` | 注入系统提示词的错误经验条数上限。`0` = 一条都不注入（会话提示词不受影响）；最大 `200`，填更大也会被夹到 200 |
 
-改法有两种，效果一样：
+**优先级**：面板里填的值优先；清空输入框并保存（或点「恢复默认」）就回到"跟随插件配置"。
+
+下面两种改法改的是**默认值**（面板没填时用它）：
 
 1. **设置 → 插件 → 插件配置**（宿主从本插件的 `Config` schema 生成这个表单）
 2. 写进 profile 的 `cordis.patch.yml`：
@@ -111,9 +117,9 @@ A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
     injectLimit: 20      # 只接受非负整数
 ```
 
-只接受**非负整数**：负数、小数、非数字会被 schema 拒绝并给出具体原因（例如 `expected number >= 0 but got -5`）。改完下一轮对话生效，不需要重启。
+只接受**非负整数**：负数、小数、非数字会被拒绝（面板里会提示；schema 会给出具体原因，例如 `expected number >= 0 but got -5`）。
 
-> 个别精简宿主可能不提供 `@deepseek-ai/schemastery`（设置表单就是由它生成的）。那种情况下**功能不受影响**：上限照旧从 patch 的 `config` 读取，走上面第 2 种改法即可，只是设置里不会出现这个字段。
+> 个别精简宿主可能不提供 `@deepseek-ai/schemastery`（设置表单由它生成）。那种情况下**功能不受影响**：面板里的输入框和 patch 的 `config` 都照常工作，只是设置里不会出现这个字段。
 
 ## 设计取舍
 
@@ -156,6 +162,8 @@ Two small panels in the DeepSeek Harness conversation header: edit prompts, keep
 | **Error library** | A dated list of recurring mistakes — a short type plus a one-sentence lesson each. The most recent 10 (a configurable number) are injected into the system prompt, so a later turn can absorb them cheaply. |
 
 The point of the second panel: an agent that keeps repeating the same class of mistake gets a short, dated reminder of it in its own context, at a token cost far below re-discovering the mistake.
+
+The two panels are mutually exclusive, and **clicking anywhere outside an open panel closes it** (Escape works too).
 
 ## Install
 
@@ -235,11 +243,15 @@ The session prompt and the **most recent 10** error entries are contributed thro
 
 ### The number of injected entries is yours to set
 
+**Set it right in the error-library panel** (the convenient way): the panel has a "注入条数上限" field — type a number, press 保存, and it takes effect on the next turn.
+
 | Field | Default | Meaning |
 |---|---|---|
 | `injectLimit` | `10` | Cap on how many error entries reach the system prompt. `0` injects none (the session prompt is unaffected); `200` is the ceiling, and anything larger is clamped to it |
 
-Two equivalent ways to change it:
+**Precedence**: a value entered in the panel wins. Emptying the field and saving (or pressing 恢复默认) puts it back on "follow the plugin config".
+
+The two routes below set the **default** (what applies while the panel field is unset):
 
 1. **Settings → Plugins → plugin config** (the host builds that form from this plugin's `Config` schema)
 2. The profile's `cordis.patch.yml`:
@@ -251,9 +263,9 @@ Two equivalent ways to change it:
     injectLimit: 20      # non-negative integers only
 ```
 
-Only a **non-negative integer** is accepted: a negative, fractional or non-numeric value is rejected by the schema with a specific reason (e.g. `expected number >= 0 but got -5`). The change takes effect on the next turn; no restart.
+Only a **non-negative integer** is accepted: a negative, fractional or non-numeric value is refused (the panel says so; the schema gives a specific reason such as `expected number >= 0 but got -5`).
 
-> A stripped-down host may not provide `@deepseek-ai/schemastery` — the package that renders the settings form. Nothing breaks in that case: the cap is still read from the patch's `config` (route 2 above); the field simply does not appear in Settings.
+> A stripped-down host may not provide `@deepseek-ai/schemastery` — the package that renders the settings form. Nothing breaks in that case: the panel's field and the patch's `config` both keep working; the field simply does not appear in Settings.
 
 ## Design notes
 

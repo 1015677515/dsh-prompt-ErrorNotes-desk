@@ -4,6 +4,32 @@ Notable changes to `dsh-prompt-ErrorNotes-desk`. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-10-14
+
+### Added
+
+- **The cap is editable from the error-library panel.** A number field, a 保存
+  button and a 恢复默认 button sit inside the panel, next to the readout that says
+  how many entries are actually reaching the model. The field's default and its
+  bounds come from the Host, so it cannot drift from what the prompt assembler
+  enforces, and it carries the reason to care: more entries means more tokens
+  injected on every request.
+- **Clicking outside an open panel closes it**, and so does Escape. The listeners
+  exist only while a panel is open, and the containment test covers both buttons
+  and both panels, so pressing a button or typing in a field counts as inside.
+
+### Changed
+
+- The cap now resolves per call from two sources, with one stated precedence: the
+  panel's own value (stored in `state.json` as `injectLimit`) wins when set, and
+  the plugin config's `injectLimit` is the default it falls back to. Clearing the
+  panel field — or 恢复默认 — returns it to that default.
+- The panel payload gained `errorLimitDefault`, `errorLimitCustom` and
+  `limitBounds`, so the Client renders the field's state from Host data instead of
+  duplicating the rules.
+- The injection readout no longer points at Settings, since the setting is now in
+  the panel it describes.
+
 ## [0.2.0] — 2026-10-14
 
 ### Changed
