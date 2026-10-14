@@ -1,0 +1,27 @@
+# 行尾归一化。
+#
+# 为什么需要它：仓库内容含大量中文，而 Windows 检出默认把 LF 转成 CRLF。
+# 这会让「本地文件字节数」与「git 里记录的 size」永远对不上（差额恰等于行数），
+# 任何按字节数比对本地与远端的检查都会误报 —— 本项目就踩过这个坑。
+# 固定成 LF 后，本地与远端逐字节一致，比对才有意义。
+* text=auto eol=lf
+
+# 二进制文件不做行尾转换。
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.zip binary
+*.tgz binary
+
+# 这些也在仓库里，明确按文本处理（便于 diff 与行尾统一）。
+*.md text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.svg text eol=lf
