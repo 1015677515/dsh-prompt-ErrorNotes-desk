@@ -1,0 +1,26 @@
+# Dependencies — never commit; the profile installs from the manifest.
+node_modules/
+.pnpm-store/
+
+# Packaging output
+*.tgz
+dist/
+build/
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and local state
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Local scratch (backups made while editing, probe scripts, etc.)
+*.bak
+*.orig-backup
+_backup/
+scratch/

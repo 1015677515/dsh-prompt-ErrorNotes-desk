@@ -1,0 +1,80 @@
+{
+  "name": "dsh-prompt-ErrorNotes-desk",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./index.js",
+  "description": "Two mutually exclusive panels in the conversation header: edit the cross-conversation global prompt and a per-session prompt, and keep a dated error-experience library that is fed back into the system prompt.",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "dshhub": {
+    "schemaVersion": 1,
+    "displayName": "Prompt Desk",
+    "summary": "在对话标题栏提供两个互斥的小面板：编辑跨对话全局提示词与本次对话提示词，并维护一份按日期归纳的错误经验库——错误经验会被注入系统提示词，让 agent 在后续对话中避免重复犯错。",
+    "categories": [
+      "提示词",
+      "Web UI",
+      "效率"
+    ],
+    "surfaces": [
+      "host",
+      "web"
+    ],
+    "capabilities": {
+      "provides": [
+        "systemPrompt:section"
+      ]
+    },
+    "compatibility": {
+      "dsh": ">=0.2.0-rc.1",
+      "node": "^22.19.0 || >=24.0.0"
+    }
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "prompt",
+    "system-prompt",
+    "memory",
+    "mistakes",
+    "agent"
+  ],
+  "author": "holo <1015677515@qq.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/1015677515/dsh-prompt-ErrorNotes-desk.git"
+  },
+  "homepage": "https://github.com/1015677515/dsh-prompt-ErrorNotes-desk#readme",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.0-rc.1"
+  }
+}
