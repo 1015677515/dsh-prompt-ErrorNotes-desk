@@ -14,10 +14,49 @@ far below re-discovering the mistake.
 
 ## Install
 
-From the app: **设置 → 插件 → 安装**, then paste the package name
-`dsh-prompt-ErrorNotes-desk`, the repository URL, or a local directory path.
+## 安装 / Install
 
-Or add it to a profile by hand:
+本插件目前只发布在 GitHub（未发布到 npm）。
+
+> 完整的安装步骤、验证方法与常见问题见 **[INSTALL.md](INSTALL.md)**。
+> 下面是最短路径。
+
+### 方式一：应用内安装（推荐）
+
+**设置 → 插件 → 安装**，在输入框里填 GitHub 短地址：
+
+```
+github:1015677515/dsh-prompt-ErrorNotes-desk
+```
+
+也可以填完整网址：
+
+```
+https://github.com/1015677515/dsh-prompt-ErrorNotes-desk
+```
+
+安装界面提示「输入插件的包名、GitHub 仓库地址或本地目录路径」，上面两种都是它接受的写法。
+
+**不需要自己写 commit SHA。** 填不带版本后缀的短地址即可：市场会先把默认分支的
+HEAD 解析成 40 位 commit SHA，再把 `github:owner/repo#<sha>` 这种已 pin 的形式交给
+pnpm。这样 lockfile 里记录的是可追溯的提交，安装后**版本号能正常显示**。
+
+> ⚠️ 反过来要注意：**不要**自己写 `#HEAD` 或让源停留在浮动分支上。源码里写明，
+> HEAD 形态的 tarball「installs perfectly and then reports no version forever」——
+> 能装上，但版本栏会一直是空的，之后也检测不到更新。
+
+### 方式二：本地目录
+
+已经克隆到本地时，直接填目录路径（安装界面会提示「本地目录」）：
+
+```
+A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
+```
+
+开发时这样最方便：local 安装默认以目录链接（Windows 上是 Junction）接入，
+改完源码刷新页面即可，不必重装。
+
+### 方式三：手动写进 profile
 
 ```yaml
 # cordis.patch.yml of your bundle
@@ -26,8 +65,18 @@ Or add it to a profile by hand:
       name: dsh-prompt-ErrorNotes-desk
 ```
 
-The browser half needs an HTTP server to talk to the host half; a profile without
-one loads the plugin and it stays inactive rather than failing.
+装好后需要**重启 DSH**：浏览器半边会热重载，但宿主半边（负责往系统提示词注入）
+要重启才会加载新的模块代次。
+
+### 环境要求
+
+| 依赖 | 要求 |
+|---|---|
+| DSH | `>=0.2.0-rc.1` |
+| Node | `^22.19.0 \|\| >=24.0.0` |
+| HTTP 服务 | 必需。宿主半边注册 `GET\|POST /prompt-desk/state`，浏览器半边靠它读写。没有 HTTP 服务的 profile 会加载插件但保持不活动，而不是报错 |
+
+无第三方运行时依赖；浏览器半边只用页面已提供的 `react`，没有构建步骤。
 
 ## What it does to your files
 
