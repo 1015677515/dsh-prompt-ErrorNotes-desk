@@ -1,6 +1,6 @@
 {
   "name": "dsh-prompt-ErrorNotes-desk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "main": "./index.js",
   "description": "Two mutually exclusive panels in the conversation header: edit the cross-conversation global prompt and a per-session prompt, and keep a dated error-experience library that is fed back into the system prompt.",
@@ -77,5 +77,8 @@
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
     "dsh": ">=0.2.0-rc.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
   }
 }

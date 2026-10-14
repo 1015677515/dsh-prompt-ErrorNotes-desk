@@ -299,17 +299,20 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', className: 'pd-primary', onClick: add }, '添加')),
 
           errors.length === 0 ? h('div', { className: 'pd-note', style: { marginTop: '10px' } }, '还没有记录。') : null,
-          // Injection accounting comes from the Host, which owns INJECT_ERROR_LIMIT.
-          // Showing it here is the difference between "the library has entries" and
-          // "the library is actually reaching the model" — the second is the whole
-          // point, and without a readout a user cannot tell the two apart.
+          // Injection accounting comes from the Host, which owns the configured limit
+          // (`injectLimit` in this plugin's config; default 10). Showing it here is the
+          // difference between "the library has entries" and "the library is actually
+          // reaching the model" — the second is the whole point, and without a readout
+          // a user cannot tell the two apart. The effective limit is printed too: it is
+          // a setting now, and a number the user cannot see is one they cannot tune.
           data && data.injection && errors.length > 0 ? h('div', {
             className: 'pd-note', style: { marginTop: '10px' },
           },
             data.injection.errorsInjected === data.injection.errorsTotal
               ? `已注入全部 ${data.injection.errorsInjected} 条（下一轮对话生效）`
-              : `已注入最近 ${data.injection.errorsInjected} 条，共 ${data.injection.errorsTotal} 条`
-                + `（上限 ${data.injection.errorLimit}）`) : null,
+              : `已注入最近 ${data.injection.errorsInjected} 条，共 ${data.injection.errorsTotal} 条（下一轮对话生效）`,
+            h('div', { className: 'pd-err-date' },
+              `上限 ${data.injection.errorLimit} 条 · 可在 设置 → 插件 → 插件配置 修改`)) : null,
           dates.map((d) => h('div', { key: d },
             h('div', { className: 'pd-label' }, d),
             byDate.get(d).map(({ e, i }) => h('div', { className: 'pd-err', key: i },

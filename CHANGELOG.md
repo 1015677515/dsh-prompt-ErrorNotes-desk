@@ -4,6 +4,27 @@ Notable changes to `dsh-prompt-ErrorNotes-desk`. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-10-14
+
+### Changed
+
+- **The injection cap now defaults to 10, down from 20.** The library exists so the
+  model absorbs a reminder, and a list long enough to skim is a list that stops
+  being read. Raise it again from the plugin config when the library is doing real
+  work.
+
+### Added
+
+- **`injectLimit` config field** — how many recent error entries reach the system
+  prompt (`10` by default, `0` injects none, clamped to `200`). It is declared as
+  the plugin's `Config` schema, so the host renders it under **Settings → Plugins →
+  plugin config**, and it can equally be set from the profile's `cordis.patch.yml`
+  (`config.injectLimit`). A negative, fractional or non-numeric value is rejected by
+  the schema with a specific reason.
+- The panel readout now prints the effective cap and where to change it, so the
+  number on screen is one the user can act on.
+- `@deepseek-ai/schemastery` is declared as a peer dependency (`^3.18.1`).
+
 ## [0.1.0] — 2026-10-14
 
 First release.

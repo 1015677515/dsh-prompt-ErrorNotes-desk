@@ -19,17 +19,76 @@
  *
  * `webServer` is injected optionally: a profile without an HTTP server loads this
  * plugin and it simply stays inactive instead of throwing.
+ *
+ * Configuration: the `Config` schema below exposes one field, `injectLimit` — how
+ * many recent error entries reach the system prompt (default 10; 0 injects none).
+ * The host renders it in the plugin settings, and it can equally be set from the
+ * profile's `cordis.patch.yml`.
  */
 
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+/*
+ * `@deepseek-ai/schemastery` is a *host* package, not an ordinary dependency.
+ *
+ * It cannot be resolved from a plugin directory by plain Node resolution, and it is
+ * not installed anywhere in the profile — pnpm's own `.modules.yaml` lists neither
+ * it nor any `@deepseek-ai/*` package — yet every plugin in this profile imports it
+ * and runs, so the harness supplies it at runtime through its own module hooks.
+ *
+ * The import is taken defensively because of what is at stake: a plugin that fails
+ * to load takes the whole harness down with it (DSH's startup is all-or-nothing), so
+ * the failure mode here has to be "no settings form", never "no harness". Without the
+ * schema the limit still arrives through `apply`'s `config` argument — which is the
+ * loader's job, not the schema's — and the built-in default still applies.
+ */
+let Schema = null;
+try {
+  ({ default: Schema } = await import('@deepseek-ai/schemastery'));
+} catch {
+  Schema = null;
+}
+
 /** Route prefix. The Client hardcodes the same string; keep them in sync. */
 const BASE = '/prompt-desk';
 
 /** Cap on a request body, so a malformed POST cannot buffer without bound. */
 const MAX_BODY_BYTES = 512 * 1024;
+
+/**
+ * How many error entries reach the prompt when the profile sets nothing.
+ *
+ * Ten rather than "as many as fit": the library exists so the model absorbs a
+ * reminder, and a list long enough to skim is a list that stops being read.
+ */
+const DEFAULT_INJECT_LIMIT = 10;
+
+/**
+ * Hard ceiling on the configured value.
+ *
+ * The value comes from YAML a user edits by hand or from a settings field, so a
+ * typo (an extra zero) must not turn every request into a thousand-line prompt.
+ */
+const MAX_INJECT_LIMIT = 200;
+
+/**
+ * The plugin's config surface.
+ *
+ * The host derives the settings UI from this schema rather than from a namespace
+ * the plugin registers (dsh >= 0.1.7 reads the plugin's own `Config`), so the
+ * fields declared here are exactly what a user gets to edit. `natural()` is
+ * `number().step(1).min(0)` in schemastery, i.e. a non-negative integer field.
+ *
+ * `undefined` when the host does not provide schemastery: that is indistinguishable
+ * from a plugin that declares no `Config`, so the host simply shows no form for it.
+ */
+export const Config = Schema === null ? undefined : Schema.object({
+  injectLimit: Schema.natural().default(DEFAULT_INJECT_LIMIT).description(
+    '注入系统提示词的错误经验条数上限（默认 10；0 表示不注入）',
+  ),
+});
 
 /**
  * Resolve `$DSH_HOME`, the directory the official agent-instructions plugin
@@ -130,11 +189,31 @@ function saveState(state) {
   writeTextFile(statePath(), `${JSON.stringify(state, null, 2)}\n`);
 }
 
+/**
+ * Coerce the configured limit into an integer in `[0, MAX_INJECT_LIMIT]`.
+ *
+ * The `Config` schema above already rejects a negative, fractional or non-numeric
+ * value (schemastery's `natural()` is `number().step(1).min(0)`), so in practice
+ * this sees a clean integer. It still validates, because it is the second of two
+ * independent guards: config can also arrive from a profile patch the host did not
+ * run through the schema, and `slice(-0)` would silently mean "inject everything".
+ *
+ * Semantics: `0` is the explicit "inject nothing". A value that is not a usable
+ * count at all falls back to the default rather than to `0`, because quietly
+ * switching the feature off is a worse failure than ignoring a typo.
+ */
+function normalizeInjectLimit(value) {
+  if (value === undefined || value === null || value === '') return DEFAULT_INJECT_LIMIT;
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_INJECT_LIMIT;
+  return Math.min(MAX_INJECT_LIMIT, Math.trunc(n));
+}
+
 /** The full payload the Client renders. */
-function currentState() {
+function currentState(injectLimit) {
   const state = loadState();
   const hasSession = state.sessionPrompt.trim() !== '';
-  const injected = Math.min(state.errors.length, INJECT_ERROR_LIMIT);
+  const injected = injectLimit <= 0 ? 0 : Math.min(state.errors.length, injectLimit);
   return {
     // The global prompt is the harness's own AGENTS.md, read fresh every time so
     // an edit made in a text editor shows up on the next panel open.
@@ -147,30 +226,20 @@ function currentState() {
      * Injection accounting, computed HERE rather than in the Client.
      *
      * The panel shows "N of M entries are being injected"; if the browser counted
-     * for itself it would have to duplicate INJECT_ERROR_LIMIT, and the two copies
-     * would drift the moment the limit changes — the panel would then confidently
-     * report a number that the prompt assembler does not agree with. One source,
-     * projected to the Client.
+     * for itself it would have to duplicate the limit, and the two copies would
+     * drift the moment the limit changes — the panel would then confidently report
+     * a number that the prompt assembler does not agree with. One source, projected
+     * to the Client, including the limit that is actually in force.
      */
     injection: {
       sessionPromptActive: hasSession,
       globalPromptActive: (readTextFile(globalPromptPath(), '')).trim() !== '',
       errorsInjected: injected,
       errorsTotal: state.errors.length,
-      errorLimit: INJECT_ERROR_LIMIT,
+      errorLimit: injectLimit,
     },
   };
 }
-
-/**
- * How many error entries reach the prompt.
- *
- * The library exists to save tokens, so it must not become a token sink: a user
- * who logs every slip for a year would otherwise carry hundreds of lines into
- * every request. Only the most recent slice is injected; the full list stays
- * readable in the panel.
- */
-const INJECT_ERROR_LIMIT = 20;
 
 /**
  * Build the text this plugin contributes to the system prompt.
@@ -183,10 +252,16 @@ const INJECT_ERROR_LIMIT = 20;
  *   · **Newest first** — a fresh mistake is more likely to recur than an old one,
  *     so when the limit truncates, the oldest entries are the ones dropped.
  *
+ * `injectLimit` is the configured cap: the library exists to save tokens, so it
+ * must not become a token sink, and a user who logs every slip for a year would
+ * otherwise carry hundreds of lines into every request. Only the most recent slice
+ * is injected; the full list stays readable in the panel. A limit of `0` injects
+ * no entries at all (`slice(-0)` would mean "everything", so this is checked).
+ *
  * Returns `''` when there is nothing to say. An empty section is skipped by the
  * assembler, so a user with no prompt and no errors pays nothing.
  */
-function buildPromptText() {
+function buildPromptText(injectLimit) {
   const state = loadState();
   const parts = [];
 
@@ -196,8 +271,8 @@ function buildPromptText() {
   }
 
   const errors = state.errors;
-  if (errors.length > 0) {
-    const recent = errors.slice(-INJECT_ERROR_LIMIT).reverse();
+  if (errors.length > 0 && injectLimit > 0) {
+    const recent = errors.slice(-injectLimit).reverse();
     const lines = recent.map((e) => {
       const type = (e.type || '').trim();
       const lesson = (e.lesson || '').trim();
@@ -207,8 +282,8 @@ function buildPromptText() {
     parts.push(
       '## Mistakes you have made before — do not repeat them\n'
       + lines.join('\n')
-      + (errors.length > INJECT_ERROR_LIMIT
-        ? `\n(Showing the most recent ${INJECT_ERROR_LIMIT} of ${errors.length}.)`
+      + (errors.length > injectLimit
+        ? `\n(Showing the most recent ${injectLimit} of ${errors.length}.)`
         : ''),
     );
   }
@@ -249,7 +324,7 @@ function sendJson(res, status, payload) {
  * Only these keys are accepted — an unknown key is ignored rather than written,
  * so a stale Client cannot inject arbitrary fields into the file.
  */
-function applyPatch(patch) {
+function applyPatch(patch, injectLimit) {
   const state = loadState();
   if (patch !== null && typeof patch === 'object') {
     if (typeof patch.sessionPrompt === 'string') state.sessionPrompt = patch.sessionPrompt;
@@ -263,7 +338,7 @@ function applyPatch(patch) {
     }
   }
   saveState(state);
-  return currentState();
+  return currentState(injectLimit);
 }
 
 /** Cordis plugin name (also the Loader row id in cordis.patch.yml). */
@@ -282,7 +357,17 @@ export const name = 'prompt-desk';
  * (Verified against the installed harness: plugin `inject` exports are string
  * arrays such as `['tools']`; there is no `{optional: [...]}` object form.)
  */
-export function apply(ctx) {
+export function apply(ctx, config) {
+  /*
+   * Resolve the configured limit once, here.
+   *
+   * `config` is this row's `config:` block from the Loader, already shaped by the
+   * `Config` schema above (so a profile that sets nothing still sees the default).
+   * Validating it once means neither prompt assembly nor the HTTP route has to
+   * re-validate a hand-edited YAML value on every call.
+   */
+  const injectLimit = normalizeInjectLimit(config?.injectLimit);
+
   /*
    * Prompt injection — the whole point of the plugin.
    *
@@ -311,7 +396,7 @@ export function apply(ctx) {
       order: 10200,
       text: () => {
         try {
-          return buildPromptText();
+          return buildPromptText(injectLimit);
         } catch {
           // A malformed state file must never break prompt assembly for the turn.
           return '';
@@ -334,7 +419,7 @@ export function apply(ctx) {
 
           if (method === 'GET') {
             try {
-              sendJson(res, 200, currentState());
+              sendJson(res, 200, currentState(injectLimit));
             } catch (error) {
               sendJson(res, 500, { error: String(error && error.message ? error.message : error) });
             }
@@ -357,7 +442,7 @@ export function apply(ctx) {
                 return;
               }
               try {
-                sendJson(res, 200, applyPatch(patch));
+                sendJson(res, 200, applyPatch(patch, injectLimit));
               } catch (error) {
                 sendJson(res, 500, { error: String(error && error.message ? error.message : error) });
               }

@@ -13,7 +13,7 @@
 | 面板 | 作用 |
 |---|---|
 | **提示词** | 编辑**跨对话**的全局提示词，以及**本次对话**的提示词（新对话会延续）。面板顶部显示哪一半当前正在生效。 |
-| **错误库** | 按日期归纳反复犯的错误：每条一个简短类型 + 一句教训。**最近若干条会被注入系统提示词**，让后续对话以极低的 token 成本吸取教训。 |
+| **错误库** | 按日期归纳反复犯的错误：每条一个简短类型 + 一句教训。**最近 10 条（条数可自己设）会被注入系统提示词**，让后续对话以极低的 token 成本吸取教训。 |
 
 第二个面板的意义：一个反复犯同类错误的 agent，会在自己的上下文里收到一份简短的、带日期的提醒，成本远低于重新踩一遍坑再发现。
 
@@ -87,11 +87,33 @@ A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
 
 ## 注入是怎么工作的
 
-本次对话提示词、以及**最近 20 条**错误经验，通过 `ctx.systemPrompt.section()` 注入，顺序值 `10200`（`DEPLOYMENT_PERSONA_SUFFIX`），即排在工具文档之后。
+本次对话提示词、以及**最近 10 条**错误经验，通过 `ctx.systemPrompt.section()` 注入，顺序值 `10200`（`DEPLOYMENT_PERSONA_SUFFIX`），即排在工具文档之后。
 
 - `text` 传的是**函数**，所以改完**下一轮对话就生效**——不用重启，也不用重新注册。
 - 只注入**类型 + 教训**。存下来的 `detail` 解释了事情经过，但它是 token 最贵、最不具行动性的一项，所以只留在面板里。
-- 上限是为了不让经验库变成 token 黑洞：完整列表始终在面板里可读，提示词里也会说明当前只显示了其中一部分。
+- 条数上限是为了不让经验库变成 token 黑洞：完整列表始终在面板里可读，提示词里也会说明当前只显示了其中一部分。
+
+### 注入条数可以自己设
+
+| 字段 | 默认 | 含义 |
+|---|---|---|
+| `injectLimit` | `10` | 注入系统提示词的错误经验条数上限。`0` = 一条都不注入（会话提示词不受影响）；最大 `200`，写更大也会被夹到 200 |
+
+改法有两种，效果一样：
+
+1. **设置 → 插件 → 插件配置**（宿主从本插件的 `Config` schema 生成这个表单）
+2. 写进 profile 的 `cordis.patch.yml`：
+
+```yaml
+- id: prompt-desk
+  name: dsh-prompt-ErrorNotes-desk
+  config:
+    injectLimit: 20      # 只接受非负整数
+```
+
+只接受**非负整数**：负数、小数、非数字会被 schema 拒绝并给出具体原因（例如 `expected number >= 0 but got -5`）。改完下一轮对话生效，不需要重启。
+
+> 个别精简宿主可能不提供 `@deepseek-ai/schemastery`（设置表单就是由它生成的）。那种情况下**功能不受影响**：上限照旧从 patch 的 `config` 读取，走上面第 2 种改法即可，只是设置里不会出现这个字段。
 
 ## 设计取舍
 
@@ -131,7 +153,7 @@ Two small panels in the DeepSeek Harness conversation header: edit prompts, keep
 | Panel | What it does |
 |---|---|
 | **Prompt** | Edits the cross-conversation global prompt and a per-session prompt that carries into the next conversation. Shows which half is currently reaching the model. |
-| **Error library** | A dated list of recurring mistakes — a short type plus a one-sentence lesson each. The most recent entries are injected into the system prompt, so a later turn can absorb them cheaply. |
+| **Error library** | A dated list of recurring mistakes — a short type plus a one-sentence lesson each. The most recent 10 (a configurable number) are injected into the system prompt, so a later turn can absorb them cheaply. |
 
 The point of the second panel: an agent that keeps repeating the same class of mistake gets a short, dated reminder of it in its own context, at a token cost far below re-discovering the mistake.
 
@@ -205,11 +227,33 @@ Writes are atomic (`.tmp` sibling + rename), so a crash cannot truncate your pro
 
 ## How the injection works
 
-The session prompt and the **most recent 20** error entries are contributed through `ctx.systemPrompt.section()` at order `10200` (`DEPLOYMENT_PERSONA_SUFFIX`), i.e. after the tool documentation.
+The session prompt and the **most recent 10** error entries are contributed through `ctx.systemPrompt.section()` at order `10200` (`DEPLOYMENT_PERSONA_SUFFIX`), i.e. after the tool documentation.
 
 - `text` is a **function**, so an edit takes effect on the next turn — no restart, no re-registration.
 - Only **type + lesson** is injected. The stored `detail` explains the incident but is the most token-expensive and least actionable field, so it stays in the panel.
-- The limit keeps the library from becoming a token sink: the full list stays readable in the panel, and the prompt says when it is showing a subset.
+- The cap keeps the library from becoming a token sink: the full list stays readable in the panel, and the prompt says when it is showing a subset.
+
+### The number of injected entries is yours to set
+
+| Field | Default | Meaning |
+|---|---|---|
+| `injectLimit` | `10` | Cap on how many error entries reach the system prompt. `0` injects none (the session prompt is unaffected); `200` is the ceiling, and anything larger is clamped to it |
+
+Two equivalent ways to change it:
+
+1. **Settings → Plugins → plugin config** (the host builds that form from this plugin's `Config` schema)
+2. The profile's `cordis.patch.yml`:
+
+```yaml
+- id: prompt-desk
+  name: dsh-prompt-ErrorNotes-desk
+  config:
+    injectLimit: 20      # non-negative integers only
+```
+
+Only a **non-negative integer** is accepted: a negative, fractional or non-numeric value is rejected by the schema with a specific reason (e.g. `expected number >= 0 but got -5`). The change takes effect on the next turn; no restart.
+
+> A stripped-down host may not provide `@deepseek-ai/schemastery` — the package that renders the settings form. Nothing breaks in that case: the cap is still read from the patch's `config` (route 2 above); the field simply does not appear in Settings.
 
 ## Design notes
 
