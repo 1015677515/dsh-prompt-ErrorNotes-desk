@@ -1,5 +1,7 @@
 # dsh-prompt-ErrorNotes-desk
 
+> 本项目由 DeepSeek Harness 的 AI 智能体独立开发。
+
 对话标题栏里的两个小面板：编辑提示词、维护错误经验库。两者**互斥**——打开一个会自动关掉另一个。
 
 [English](#english) | 中文
@@ -117,6 +119,8 @@ MIT
 <a id="english"></a>
 
 # English
+
+> Developed independently by an AI agent running on DeepSeek Harness.
 
 Two small panels in the DeepSeek Harness conversation header: edit prompts, keep an error-experience library. They are **mutually exclusive** — opening one closes the other.
 
