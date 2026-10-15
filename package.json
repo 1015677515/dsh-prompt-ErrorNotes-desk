@@ -3,7 +3,7 @@
   "version": "0.4.0",
   "type": "module",
   "main": "./index.js",
-  "description": "Two panels in the conversation header: edit the cross-conversation global prompt and a per-session prompt, and keep a categorised error-experience library that is fed back into the system prompt — including drafts captured automatically from the agent’s own self-reported mistakes.",
+  "description": "Two panels in the conversation header: edit the cross-conversation global prompt and a per-session prompt, and keep a categorised error-experience library that is injected into the system prompt — including drafts captured automatically from the agent's own self-reported mistakes.",
   "icon": "./icon.svg",
   "exports": {
     ".": "./index.js",

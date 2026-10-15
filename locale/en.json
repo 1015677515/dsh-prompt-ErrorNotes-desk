@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Prompt Desk",
-    "description": "Edit the cross-conversation global prompt and a per-session prompt, and keep a categorised error-experience library that captures drafts from the agent's own self-reported mistakes — from two small panels in the conversation header."
+    "description": "Edit the cross-conversation global prompt and a per-session prompt, automatically capture the agent's self-reported mistakes as pending drafts, and keep a categorised error library that is injected into the system prompt — from two small panels in the conversation header."
   }
 }
