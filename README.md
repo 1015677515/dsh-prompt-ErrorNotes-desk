@@ -19,6 +19,16 @@
 
 **点面板以外的空白处会自动关闭**（按 Esc 也可以）。
 
+## 界面预览
+
+**错误经验库** —— 按分类折叠，每条带下拉框可改类；顶部显示注入条数，底部是自动捕获的待确认草稿：
+
+![错误经验库面板](picture/errornotes.png)
+
+**提示词** —— 顶部自检状态与「临时暂停注入」，中间是全局与本次对话提示词，底部是实际注入文本的预览：
+
+![提示词面板](picture/prompt.png)
+
 ## 安装
 
 本插件目前只发布在 GitHub（未发布到 npm）。
@@ -241,6 +251,16 @@ Two small panels in the DeepSeek Harness conversation header: edit prompts, keep
 The point of the second panel: an agent that keeps repeating the same class of mistake gets a short, categorised reminder of it in its own context, at a token cost far below re-discovering the mistake.
 
 **Clicking anywhere outside an open panel closes it** (Escape works too).
+
+## Screenshots
+
+**Error library** — collapsible category groups, a per-row dropdown to re-file an entry, the injection count on top, and automatically captured drafts awaiting confirmation:
+
+![Error library panel](picture/errornotes.png)
+
+**Prompt** — the self-check line and the temporary pause on top, the global and per-session prompts in the middle, and a preview of the exact injected text at the bottom:
+
+![Prompt panel](picture/prompt.png)
 
 ## Install
 

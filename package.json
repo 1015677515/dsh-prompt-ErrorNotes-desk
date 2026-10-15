@@ -17,6 +17,8 @@
     "cordis.patch.yml",
     "icon.svg",
     "locale",
+    "picture",
+    "screenshots.json",
     "README.md",
     "INSTALL.md",
     "CHANGELOG.md",

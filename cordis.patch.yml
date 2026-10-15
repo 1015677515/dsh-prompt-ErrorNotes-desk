@@ -2,7 +2,7 @@
 #
 # Contributes ONE host row: the plugin half that stores the prompt / error-library
 # state and serves it to the browser half over same-origin HTTP routes
-# (GET|POST /prompt-desk/state, GET|POST /prompt-desk/agents).
+# (GET|POST /prompt-desk/state, GET /prompt-desk/pending).
 #
 # A patch replaces the targeted row's whole `config`, so only additive `insert`
 # rows appear here (never override an existing shipped row).
