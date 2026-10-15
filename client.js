@@ -716,7 +716,7 @@ window.__ModuleLoader__.load({
 
           errors.length === 0 && pendings.length === 0
             ? h('div', { className: 'pd-note', style: { marginTop: '10px' } },
-              '还没有记录。当 agent 说出「我犯了个错误：…」时会自动出现在上面的待确认区。')
+              '还没有记录。当 agent 按格式汇报（「我发现了个错误：错误经过：… 教训：…」）时会自动出现在上面的待确认区。')
             : null,
 
           /*

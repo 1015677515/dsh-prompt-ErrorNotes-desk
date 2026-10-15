@@ -167,28 +167,63 @@ for (const group of CATEGORIES) {
 /**
  * The confession cue injected alongside the library.
  *
- * This is what makes automatic capture possible at all: the Host listens for this
- * exact marker in the assistant's own output, so a self-reported mistake has to be
+ * This is what makes automatic capture possible at all: the Host listens for a
+ * fixed marker in the assistant's own output, so a self-reported mistake has to be
  * phrased the same way every time. Free-form prose ("这里我判断错了", "上面那步有问题")
  * varies too much to detect reliably.
  *
- * The `｜` (fullwidth vertical bar) separator separates the incident from the rule.
- * It is a deliberate choice over `|` or `->`: it does not collide with markdown
- * tables, code, or the arrows the lesson text already uses, and prose rarely
- * contains it. A confession without the separator still parses — the whole line
- * becomes the incident and the user fills in the rule on confirmation.
+ * ## Why labelled fields replaced the `｜` separator
+ *
+ * The previous format was `我犯了个错误：<错在哪>｜<以后怎么避免>`, split on a fullwidth
+ * `｜`. Real drafts proved that unreliable: a sentence *quoting* the separator —
+ * "（忘了写 `｜`）" — split in the wrong place and produced two junk drafts, and a
+ * line carrying the marker with no separator at all was still captured with an empty
+ * lesson. A separator character is simply too easy to mention in prose.
+ *
+ * The labels `错误经过：` and `教训：` are the fix. They are structural anchors a
+ * discussion of this feature rarely reproduces by accident, and requiring both — in
+ * that order — rejects every real false positive seen so far while still accepting
+ * the two ways a confession naturally gets written.
+ *
+ * ## The format
+ *
+ * ```
+ * 我发现了个错误：错误经过：<what actually happened> 教训：<one actionable rule>
+ * ```
+ *
+ * Both markers are accepted (`我发现了个错误` and `我犯了个错误`) because the model
+ * reaches for either one; the marker may also be omitted in favour of the label
+ * alone. The marker must start its line, so a sentence that merely mentions it does
+ * not open a capture.
  */
 const CUE_TITLE = '## 自我认错';
 const CUE_BODY = [
-  '发现自身错误时用这一句式说出，插件会把它记入错误经验库、待用户确认：',
-  '我犯了个错误：<错在哪>｜<以后怎么避免>',
+  '发现自身错误时，**必须**主动用下面这一行汇报。插件会捕获它、记为待确认草稿，由用户确认后入库：',
+  '我发现了个错误：错误经过：<当时实际发生了什么> 教训：<以后怎么做，一句可执行的规则>',
+  '',
+  '写法要求：',
+  '- 两个标签缺一不可，顺序固定为「错误经过：」在前、「教训：」在后；**缺任一标签的那一行不会被捕获**。',
+  '- 「错误经过」写**当时实际发生了什么**，不写「我错了」这类空话。',
+  '- 「教训」写**下次怎么做**，要能直接照做。',
+  '- 三个部分必须在**同一行**内写完。',
+  '- 分类由用户在面板里选，不必写进这一行。',
+  '',
+  '示例：',
+  '我发现了个错误：错误经过：把「命令返回非空」当成「命令执行成功」，没查退出码 教训：凡以返回码判断成败的调用，必须同时检查 exit code 与输出。',
 ].join('\n');
 
-/** The literal substring the assistant output is scanned for. */
-const CONFESSION_MARKER = '我犯了个错误：';
+/**
+ * Markers that open a confession. Either is accepted; the earliest occurrence in
+ * the text wins. A marker only counts when it starts its line — see
+ * {@link parseConfession}.
+ */
+const CONFESSION_MARKERS = ['我发现了个错误', '我犯了个错误'];
 
-/** The separator between incident and rule inside a confession. */
-const CONFESSION_SEPARATOR = '｜';
+/** Label introducing the "what actually happened" field. */
+const INCIDENT_LABEL = /错误经过\s*[：:]/;
+
+/** Label introducing the lesson field. */
+const LESSON_LABEL = /教训\s*[：:]/;
 
 /**
  * Ceiling on the pending queue.
@@ -822,31 +857,107 @@ function applyPatch(patch, configLimit) {
  * The text after the marker runs to the end of its line, which is what keeps a
  * confession from swallowing the paragraphs that follow it.
  */
+/**
+ * Upper bound on the "what went wrong" half, in characters.
+ *
+ * Calibrated against the real library rather than guessed: the longest genuine
+ * incident in the user's own entries is 85 characters. 200 leaves generous room for
+ * a longer description while still rejecting the failure this exists to stop — a
+ * whole paragraph of surrounding prose swept up because the marker happened to
+ * appear inside it (one such draft was 30+ characters of a README sentence, another
+ * ran to the end of a code comment).
+ */
+const MAX_INCIDENT_CHARS = 200;
+
+/**
+ * Characters that can only start a code fragment, not a natural-language incident.
+ *
+ * A real "what went wrong" begins with a word. These starts are what a quoted
+ * snippet looks like: the marker appears inside source code or an example, and the
+ * text right after it is punctuation left over from the quoting.
+ */
+const CODE_START = /^[;:'"`)\]},.<>|/\\]/;
+
+/**
+ * Parse one assistant message for a confession.
+ *
+ * Returns a draft, or null when the text is not a confession. Every rejection here
+ * is a draft the user does not have to discard by hand, so the checks are
+ * deliberately strict — a missed confession costs one manual entry, while a false
+ * one costs a review round and erodes trust in the panel.
+ *
+ * Rejection rules, in order:
+ *   1. one of {@link CONFESSION_MARKERS} must appear;
+ *   2. it must **start its line** (only whitespace, list bullets or blockquote
+ *      markers before it) — a sentence that merely mentions the marker is not a
+ *      confession. This is what stops a message *about* this feature from being
+ *      captured;
+ *   3. the marker's line must carry {@link INCIDENT_LABEL} and then
+ *      {@link LESSON_LABEL}, in that order;
+ *   4. both fields must be non-empty after trimming;
+ *   5. neither may contain angle brackets (an echo of the template itself);
+ *   6. the incident must not begin with code punctuation, and must not exceed
+ *      {@link MAX_INCIDENT_CHARS}.
+ *
+ * The two labels are what replaced the old `｜` separator. A separator character
+ * gets quoted in prose ("（忘了写 `｜`）") and splits in the wrong place; the labels
+ * are far harder to reproduce by accident, and demanding both in order is what
+ * rejects the junk drafts users were discarding by hand.
+ */
 function parseConfession(text) {
   if (typeof text !== 'string') return null;
-  const at = text.indexOf(CONFESSION_MARKER);
+
+  // The earliest marker wins, so `我发现了个错误` before `我犯了个错误` reads naturally.
+  let at = -1;
+  for (const marker of CONFESSION_MARKERS) {
+    const index = text.indexOf(marker);
+    if (index >= 0 && (at < 0 || index < at)) at = index;
+  }
   if (at < 0) return null;
 
-  const rest = text.slice(at + CONFESSION_MARKER.length);
-  const line = rest.split(/\r?\n/, 1)[0].trim();
-  if (line === '') return null;
+  /*
+   * The marker must open its line.
+   *
+   * Quoting the marker mid-sentence is the normal way a discussion of this feature
+   * reads, and every such sentence used to become a draft. Only whitespace, list
+   * bullets, ordered-list numbers and blockquote markers may precede it.
+   */
+  const lineStart = text.lastIndexOf('\n', at) + 1;
+  if (!/^[\s\-*+>\d.]*$/.test(text.slice(lineStart, at))) return null;
 
-  const cut = line.indexOf(CONFESSION_SEPARATOR);
-  const incident = (cut < 0 ? line : line.slice(0, cut)).trim();
-  const rule = cut < 0 ? '' : line.slice(cut + CONFESSION_SEPARATOR.length).trim();
-  if (incident === '' && rule === '') return null;
+  // Both labels must sit on the marker's own line; a confession is one line.
+  const line = text.slice(at).split(/\r?\n/, 1)[0];
+
+  const incidentMatch = INCIDENT_LABEL.exec(line);
+  if (incidentMatch === null) return null;
+  const lessonMatch = LESSON_LABEL.exec(line);
+  if (lessonMatch === null) return null;
+  // Order is fixed: a lesson before the incident is not the documented format.
+  if (lessonMatch.index <= incidentMatch.index) return null;
+
+  const incident = line
+    .slice(incidentMatch.index + incidentMatch[0].length, lessonMatch.index)
+    .trim();
+  const rule = line.slice(lessonMatch.index + lessonMatch[0].length).trim();
+  if (incident === '' || rule === '') return null;
 
   /*
    * Reject an echo of the instruction itself.
    *
    * The cue lives in the system prompt and spells the template out in full, so a
-   * model that quotes the format back — "我犯了个错误：<错在哪>｜<以后怎么避免>" — would
-   * otherwise be captured verbatim as a confession whose incident is "<错在哪>".
+   * model that quotes the format back — "错误经过：<当时实际发生了什么> 教训：<…>" — would
+   * otherwise be captured verbatim as a confession whose incident is "<当时实际发生了什么>".
    * Angle brackets are the tell: a genuine confession describes an incident and does
    * not wrap it in placeholders. Dropping the line is the right failure here; a
    * false draft costs the user a review round for nothing.
    */
   if (/[<>]/.test(incident) || /[<>]/.test(rule)) return null;
+
+  // A quoted code fragment, not a description of what went wrong.
+  if (CODE_START.test(incident)) return null;
+
+  // Too short to describe anything, or so long it is clearly swept-up prose.
+  if (incident.length < 4 || incident.length > MAX_INCIDENT_CHARS) return null;
 
   return {
     date: today(),

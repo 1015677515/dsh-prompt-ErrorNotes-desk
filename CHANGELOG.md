@@ -4,6 +4,41 @@ Notable changes to `dsh-prompt-ErrorNotes-desk`. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] — 2026-10-15
+
+### Fixed
+
+- **False-positive drafts from marker quotations.** The confession parser treated
+  any occurrence of the marker as a confession, so a code sample, a README excerpt,
+  or a message *discussing* this feature became a draft the user had to discard by
+  hand. Real examples that reached the panel: `';`, `」`, a fragment of a code
+  comment, and a sentence of README prose. The marker must now **start its line**
+  (only whitespace, list bullets, ordered-list numbers or `>` may precede it).
+- **The `｜` separator split in the wrong place.** A sentence containing
+  "（忘了写 `｜`）" put the separator in the middle of prose, producing two junk
+  drafts from one line. The separator is no longer used at all — see the format
+  change below.
+
+### Changed
+
+- **New confession format, replacing the `｜` separator with labelled fields:**
+
+  ```
+  我发现了个错误：错误经过：<what actually happened> 教训：<one actionable rule>
+  ```
+
+  Both labels are required and their order is fixed, which is what rejects the
+  marker quotations above while still accepting how a confession is naturally
+  written. Either marker is accepted (`我发现了个错误` and `我犯了个错误`); the
+  earliest occurrence in the text wins. **The old `我犯了个错误：xxx｜yyy` format is
+  no longer captured.**
+- **The cue now asks for both fields explicitly**, states that a line missing either
+  label will not be captured, and gives a worked example. It also spells out that
+  the category is chosen in the panel rather than written into the line, which
+  answers "how do I fill in the library" at the point the model reads it.
+- The empty-state note in the panel and both READMEs were updated to the new
+  format.
+
 ## [0.4.0] — 2026-10-15
 
 ### Added
