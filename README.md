@@ -13,7 +13,7 @@
 | 面板 | 作用 |
 |---|---|
 | **提示词** | 编辑**跨对话**的全局提示词，以及**本次对话**的提示词（新对话会延续）。面板顶部显示哪一半当前正在生效。 |
-| **错误库** | **按分类**归纳反复犯的错误：每条一个简短类型 + 一句教训，归入三档分类之一。**最近 10 条（条数可自己设）会被注入系统提示词**，让后续对话以极低的 token 成本吸取教训。agent 按格式汇报「我发现了个错误：错误经过：… 教训：…」时会被自动捕获成待确认草稿。 |
+| **错误库** | **按分类**归纳反复犯的错误：每条一个简短类型 + 一句教训，归入三档分类之一。**最近 10 条（条数可自己设）会被注入系统提示词**，让后续对话以极低的 token 成本吸取教训。agent 按格式汇报「我犯了个错误：错误经过：… 教训：…」时会被自动捕获成待确认草稿。 |
 
 第二个面板的意义：一个反复犯同类错误的 agent，会在自己的上下文里收到一份简短的、按分类归好的提醒，成本远低于重新踩一遍坑再发现。
 
@@ -146,33 +146,28 @@ A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
 - 老条目（v1 没有分类字段）会统一落在**其他**，在面板里用下拉框手工归档即可。插件**不会**按文本猜分类——猜错比不猜更糟。
 - 分类 slug 写入时校验：手改状态文件写进一个不存在的分类，会被归到**其他**，不会污染面板。
 
-## 自动采集：agent 汇报「我发现了个错误」，它记下来
+## 自动采集：agent 汇报「我犯了个错误」，它记下来
 
-开启错误库导出时，插件会在系统提示词里附一段固定的**认错引导**：
+开启错误库导出时，插件会在系统提示词里附一段固定的**认错引导**（实际注入的全文，逐字）：
 
 ```
 ## 自我认错
-发现自身错误时，**必须**主动用下面这一行汇报。插件会捕获它、记为待确认草稿，由用户确认后入库：
-我发现了个错误：错误经过：<当时实际发生了什么> 教训：<以后怎么做，一句可执行的规则>
-
-写法要求：
-- 两个标签缺一不可，顺序固定为「错误经过：」在前、「教训：」在后；缺任一标签的那一行不会被捕获。
-- 「错误经过」写当时实际发生了什么，不写「我错了」这类空话。
-- 「教训」写下次怎么做，要能直接照做。
-- 三个部分必须在同一行内写完。
-- 分类由用户在面板里选，不必写进这一行。
-
-示例：
-我发现了个错误：错误经过：把「命令返回非空」当成「命令执行成功」，没查退出码 教训：凡以返回码判断成败的调用，必须同时检查 exit code 与输出。
+发现自身错误时，**必须**主动用下面这一行汇报：
+我犯了个错误：错误经过：<当时实际发生了什么> 教训：<以后怎么做，一句可执行的规则>
+两个标签缺一不可、顺序固定，且必须写在同一行；缺任一标签或换行都不会被捕获。分类由用户在面板里选。
+错误经过与教训都要简洁，各控制在 20 字以内。
 ```
 
 宿主半边监听助手的输出流，发现这个句式就把一条**草稿**放进面板顶部的「待确认」区，并在**错误库按钮上显示数字徽标**。草稿不会自动进库——必须点「采纳」；采纳前可以改措辞、选分类，或者直接「丢弃」。
 
-- **两个标记都认**：`我发现了个错误` 与 `我犯了个错误`。取全文里最靠前的那个。
+- **两个标记都认**：`我犯了个错误`（引导里示范的那个）与 `我发现了个错误`。命中多个时，取**最靠前的、能解析成功的那一个**。
 - **标记必须位于行首**（前面只允许空白、列表符号 `- * +`、有序列表序号或 `>`）。这一条是为了挡住"在句子里提到标记"——讨论本功能、引用代码、摘录文档时，标记常常出现在句子中间，那不是认错。
-- **`错误经过：` 与 `教训：` 是硬边界**，且顺序固定。这是取代旧 `｜` 分隔符的关键改动：分隔符太容易在散文里被引用（曾有一句话里写着"（忘了写 `｜`）"，结果在错误的位置切开，产生了垃圾草稿），而两个标签很难被无意复现。
-- **旧格式不再捕获**：`我犯了个错误：xxx｜yyy` 这种写法不会再产生草稿，请用新格式。
-- 一条消息**最多产生一条草稿**；同一句话重复出现只算一次；队列上限 20 条，旧的先丢。
+- **不合法的那一处会被跳过，而不是放弃整条消息**。这是很容易踩坑的一条：如果一条消息里**先提到**标记（引用它、演示格式、讨论本功能），**再写出真正的认错**，真正的认错**仍然会被捕获**——早先的实现只检查最靠前的那一个，一旦它在行中就整条放弃，结果是"边解释格式边认错"这种最常见的写法**静默丢失**。现在会继续往后找，直到找到合法的认错为止。
+- **`错误经过：` 与 `教训：` 是硬边界**，且顺序固定、必须在同一行。这是取代旧 `｜` 分隔符的关键改动：分隔符太容易在散文里被引用（曾有一句话里写着"（忘了写 `｜`）"，结果在错误的位置切开，产生了垃圾草稿），而两个标签很难被无意复现。
+- **必须写在同一行**：解析只看标记所在的那一行，所以「教训」换到下一行会**静默丢弃**——不会有任何报错，你也不会看到草稿。这是最容易踩的一条。
+- **旧格式不再捕获**：`我犯了个错误：xxx｜yyy`（用 `｜` 分隔、无标签）不会再产生草稿，请用双标签格式。
+- **20 字是建议，不是硬限制**。代码只校验「错误经过」在 4~200 字之间；教训没有长度校验。写超了照样会被捕获，只是注入了 token 会多一些。
+- 一条消息**最多产生一条草稿**（取最先解析成功的那一处）；同一句话重复出现只算一次；队列上限 20 条，旧的先丢。
 - 捕获到的内容若带尖括号（模型把模板本身回显出来）、以代码标点开头、或「错误经过」短于 4 字 / 长于 200 字，都会被**直接丢弃**——否则会记下"错误经过 = `<当时实际发生了什么>`"这类垃圾。
 
 > 认错引导和错误经验列表由**同一个开关**控制：引导的存在就是为了喂这个库，库不注入时还留着引导，等于让 agent 对着空气认错。
@@ -259,7 +254,7 @@ Two small panels in the DeepSeek Harness conversation header: edit prompts, keep
 | Panel | What it does |
 |---|---|
 | **Prompt** | Edits the cross-conversation global prompt and a per-session prompt that carries into the next conversation. Shows which half is currently reaching the model. |
-| **Error library** | Recurring mistakes grouped **by category** — a short type plus a one-sentence lesson each, filed under one of three top-level categories. The most recent 10 (a configurable number) are injected into the system prompt, so a later turn can absorb them cheaply. A message reporting 「我发现了个错误：错误经过：… 教训：…」 is captured automatically as a draft awaiting confirmation. |
+| **Error library** | Recurring mistakes grouped **by category** — a short type plus a one-sentence lesson each, filed under one of three top-level categories. The most recent 10 (a configurable number) are injected into the system prompt, so a later turn can absorb them cheaply. A message reporting 「我犯了个错误：错误经过：… 教训：…」 is captured automatically as a draft awaiting confirmation. |
 
 The point of the second panel: an agent that keeps repeating the same class of mistake gets a short, categorised reminder of it in its own context, at a token cost far below re-discovering the mistake.
 
@@ -392,33 +387,28 @@ The split is by **remedy**, not by symptom: each leaf names a concrete thing to 
 - Entries predating categories (a v1 file has no category field) land in **其他** and are filed by hand with the dropdown. The plugin **never** guesses a category from the text — guessing wrong is worse than not guessing.
 - Slugs are validated on write: a hand-edited file naming a category that does not exist lands in **其他** rather than polluting the panel.
 
-## Automatic capture: "我发现了个错误" gets recorded
+## Automatic capture: "我犯了个错误" gets recorded
 
-With export enabled, the plugin appends a fixed **confession cue** to the system prompt:
+With export enabled, the plugin appends a fixed **confession cue** to the system prompt (the injected text, verbatim):
 
 ```
 ## 自我认错
-发现自身错误时，**必须**主动用下面这一行汇报。插件会捕获它、记为待确认草稿，由用户确认后入库：
-我发现了个错误：错误经过：<当时实际发生了什么> 教训：<以后怎么做，一句可执行的规则>
-
-写法要求：
-- 两个标签缺一不可，顺序固定为「错误经过：」在前、「教训：」在后；缺任一标签的那一行不会被捕获。
-- 「错误经过」写当时实际发生了什么，不写「我错了」这类空话。
-- 「教训」写下次怎么做，要能直接照做。
-- 三个部分必须在同一行内写完。
-- 分类由用户在面板里选，不必写进这一行。
-
-示例：
-我发现了个错误：错误经过：把「命令返回非空」当成「命令执行成功」，没查退出码 教训：凡以返回码判断成败的调用，必须同时检查 exit code 与输出。
+发现自身错误时，**必须**主动用下面这一行汇报：
+我犯了个错误：错误经过：<当时实际发生了什么> 教训：<以后怎么做，一句可执行的规则>
+两个标签缺一不可、顺序固定，且必须写在同一行；缺任一标签或换行都不会被捕获。分类由用户在面板里选。
+错误经过与教训都要简洁，各控制在 20 字以内。
 ```
 
 The Host watches the assistant's output stream; on seeing that phrasing it puts a **draft** into the 待确认 queue at the top of the panel and shows a **count badge on the 错误库 button**. A draft never enters the library by itself — you press 采纳, and you may rewrite the wording and pick a category first, or discard it.
 
-- **Either marker is accepted**: `我发现了个错误` and `我犯了个错误`. The earliest occurrence in the text wins.
+- **Either marker is accepted**: `我犯了个错误` (the one the cue demonstrates) and `我发现了个错误`. When several match, the earliest one that **parses cleanly** wins.
 - **The marker must start its line** (only whitespace, a list bullet `- * +`, an ordered-list number, or `>` may precede it). The rule exists to reject sentences that merely *mention* the marker — a discussion of this feature, a code sample, or a documentation excerpt usually carries it mid-sentence, which is not a confession.
-- **`错误经过：` and `教训：` are hard boundaries**, and their order is fixed. This is what replaced the old `｜` separator: a separator character gets quoted in prose (one real sentence contained "（忘了写 `｜`）", which split in the wrong place and produced two junk drafts), while two labels are very hard to reproduce by accident.
-- **The old format is no longer captured**: `我犯了个错误：xxx｜yyy` produces no draft. Use the new format.
-- One message yields **at most one draft**; the same sentence repeating counts once; the queue is capped at 20, oldest dropped.
+- **A rejected occurrence is skipped, not fatal to the message.** This is the easiest trap of all: if a message **mentions** the marker first (quoting it, showing the format, discussing this feature) and then **confesses for real**, the real confession is **still captured**. An earlier version only inspected the earliest occurrence, so a mid-sentence mention made it give up on the whole message — the commonest way to write a confession ("explain the format, then confess") was lost **silently**. The search now continues past rejected candidates until one parses.
+- **`错误经过：` and `教训：` are hard boundaries**, and their order is fixed and must be on one line. This is what replaced the old `｜` separator: a separator character gets quoted in prose (one real sentence contained "（忘了写 `｜`）", which split in the wrong place and produced two junk drafts), while two labels are very hard to reproduce by accident.
+- **The whole confession must be on one line.** The parser only reads the line the marker sits on, so a lesson moved to the next line is **dropped silently** — no error, and no draft for you to see. This is the easiest rule to trip over.
+- **The old format is no longer captured**: `我犯了个错误：xxx｜yyy` (separator, no labels) produces no draft. Use the two-label format.
+- **The 20-character limit is guidance, not enforcement.** The code only checks the incident is 4–200 characters; the lesson has no length check at all. Writing longer still gets captured — it just costs more tokens once injected.
+- One message yields **at most one draft** (the first occurrence that parses); the same sentence repeating counts once; the queue is capped at 20, oldest dropped.
 - A capture is **dropped** when it contains angle brackets (the model echoing the template itself), begins with code punctuation, or has an incident field shorter than 4 or longer than 200 characters — otherwise it would record an entry whose incident is literally `<当时实际发生了什么>`.
 
 > The cue and the library are gated by the **same switch**: the cue exists to feed the library, so leaving it on with the library un-injected would ask the agent to confess into nothing.

@@ -82,7 +82,7 @@ const MAX_INJECT_LIMIT = 200;
  * the other. Publishing this lets the panel say so outright instead of defending
  * every field against an older peer. Bump it with package.json.
  */
-const PLUGIN_VERSION = '0.4.0';
+const PLUGIN_VERSION = '1.1.0';
 
 /**
  * Current on-disk state shape.
@@ -185,31 +185,35 @@ for (const group of CATEGORIES) {
  * that order — rejects every real false positive seen so far while still accepting
  * the two ways a confession naturally gets written.
  *
- * ## The format
+ * ## Why this block is short
  *
- * ```
- * 我发现了个错误：错误经过：<what actually happened> 教训：<one actionable rule>
- * ```
+ * It is injected on **every** request, so its length is a per-turn cost paid for the
+ * whole session. The earlier version spelled out five style rules and a worked
+ * example, costing 349 characters (~188-302 tokens) — most of it advice the model
+ * only needs to read once. What survives here is exactly what the parser
+ * *enforces*, because a rule the code does not check is a rule that fails silently:
  *
- * Both markers are accepted (`我发现了个错误` and `我犯了个错误`) because the model
- * reaches for either one; the marker may also be omitted in favour of the label
- * alone. The marker must start its line, so a sentence that merely mentions it does
- * not open a capture.
+ *   - both labels, in that order — enforced by {@link INCIDENT_LABEL} /
+ *     {@link LESSON_LABEL} ordering;
+ *   - **the whole confession on one line** — enforced by the parser slicing only to
+ *     the first newline. This one matters most: a confession written across two
+ *     lines is dropped with no error at all, so the user never learns it was lost.
+ *     Omitting this rule to save characters would trade a real silent failure for
+ *     about ten tokens.
+ *
+ * Style advice ("write what happened, not 'I was wrong'") is deliberately gone: it
+ * guides the model's phrasing, it is not a condition for capture, so it does not
+ * belong in a block that is re-sent every turn. The one exception is the length
+ * limit below, which is kept despite being guidance rather than enforcement —
+ * captured entries are re-injected on every later turn, so a shorter entry pays for
+ * itself many times over, and this cue is the only place the model learns that.
  */
 const CUE_TITLE = '## 自我认错';
 const CUE_BODY = [
-  '发现自身错误时，**必须**主动用下面这一行汇报。插件会捕获它、记为待确认草稿，由用户确认后入库：',
-  '我发现了个错误：错误经过：<当时实际发生了什么> 教训：<以后怎么做，一句可执行的规则>',
-  '',
-  '写法要求：',
-  '- 两个标签缺一不可，顺序固定为「错误经过：」在前、「教训：」在后；**缺任一标签的那一行不会被捕获**。',
-  '- 「错误经过」写**当时实际发生了什么**，不写「我错了」这类空话。',
-  '- 「教训」写**下次怎么做**，要能直接照做。',
-  '- 三个部分必须在**同一行**内写完。',
-  '- 分类由用户在面板里选，不必写进这一行。',
-  '',
-  '示例：',
-  '我发现了个错误：错误经过：把「命令返回非空」当成「命令执行成功」，没查退出码 教训：凡以返回码判断成败的调用，必须同时检查 exit code 与输出。',
+  '发现自身错误时，**必须**主动用下面这一行汇报：',
+  '我犯了个错误：错误经过：<当时实际发生了什么> 教训：<以后怎么做，一句可执行的规则>',
+  '两个标签缺一不可、顺序固定，且必须写在同一行；缺任一标签或换行都不会被捕获。分类由用户在面板里选。',
+  '错误经过与教训都要简洁，各控制在 20 字以内。',
 ].join('\n');
 
 /**
@@ -588,10 +592,17 @@ function buildSectionText(state, configLimit, { lessonsEnabled = true } = {}) {
       if (type !== '' && lesson !== '') return `- ${type} → ${lesson}`;
       return `- ${type || lesson}`;
     });
-    errorBlock = '## Mistakes you have made before — do not repeat them\n'
+    /*
+     * Title and trailer are Chinese and short on purpose: this block is re-sent on
+     * every request, so every character is a per-turn cost. The English title
+     * ("Mistakes you have made before — do not repeat them") and the English
+     * truncation note cost roughly 3x their Chinese equivalents for the same
+     * meaning, and the entries themselves are already Chinese.
+     */
+    errorBlock = '## 别重犯以下错误\n'
       + lines.join('\n')
       + (state.errors.length > limit
-        ? `\n(Showing the most recent ${limit} of ${state.errors.length}.)`
+        ? `\n（仅显示最近 ${limit} 条，共 ${state.errors.length} 条。）`
         : '');
   }
 
@@ -907,14 +918,49 @@ const CODE_START = /^[;:'"`)\]},.<>|/\\]/;
 function parseConfession(text) {
   if (typeof text !== 'string') return null;
 
-  // The earliest marker wins, so `我发现了个错误` before `我犯了个错误` reads naturally.
-  let at = -1;
+  /*
+   * Try **every** marker occurrence, earliest first, instead of only the first.
+   *
+   * This used to read the first occurrence, reject it if it did not open its line,
+   * and give up on the message. That silently lost the real confession in the single
+   * most common shape there is: a message that first *mentions* the marker (quoting
+   * it, showing the format, discussing this feature) and then confesses. Measured
+   * case: "先说 `我犯了个错误` 这个词，然后\n我犯了个错误：错误经过：真实错误 教训：真实教训"
+   * returned null — the quotation consumed the whole message.
+   *
+   * Now a rejected occurrence is simply skipped, and the search continues to the
+   * next one. Every rejection rule below is unchanged and still applied to each
+   * candidate in turn; only the give-up-on-first-failure behaviour is gone. The
+   * earliest occurrence that parses cleanly still wins, so a message with several
+   * genuine confessions yields one draft — the documented maximum.
+   */
+  const positions = [];
   for (const marker of CONFESSION_MARKERS) {
-    const index = text.indexOf(marker);
-    if (index >= 0 && (at < 0 || index < at)) at = index;
+    let from = 0;
+    for (;;) {
+      const found = text.indexOf(marker, from);
+      if (found < 0) break;
+      positions.push(found);
+      from = found + marker.length; // + length: a stale match cannot repeat forever
+    }
   }
-  if (at < 0) return null;
+  if (positions.length === 0) return null;
+  positions.sort((a, b) => a - b);
 
+  for (const at of positions) {
+    const draft = parseConfessionAt(text, at);
+    if (draft !== null) return draft;
+  }
+  return null;
+}
+
+/**
+ * Try to read one confession starting at `at`, a known marker offset.
+ *
+ * Split out of {@link parseConfession} so a rejected candidate costs nothing but a
+ * `continue`. Returns null when this occurrence is not a confession.
+ */
+function parseConfessionAt(text, at) {
   /*
    * The marker must open its line.
    *

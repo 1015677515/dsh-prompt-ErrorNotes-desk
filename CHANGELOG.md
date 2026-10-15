@@ -4,6 +4,29 @@ Notable changes to `dsh-prompt-ErrorNotes-desk`. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] — 2026-10-15
+
+### Fixed
+
+- **A confession was lost when the message mentioned the marker first.** The parser
+  inspected only the *earliest* marker occurrence; if that one did not open its line
+  it gave up on the whole message. So the commonest shape of all — quote the marker,
+  show the format, discuss the feature, *then* confess — was dropped **silently**,
+  with no draft and no error. Measured: ``先说 `我犯了个错误` 这个词，然后\n我犯了个错误：错误经过：真实错误 教训：真实教训``
+  returned `null`. Rejected occurrences are now skipped and the search continues, so
+  the real confession is found. Every rejection rule is unchanged and still applied
+  to each candidate in turn.
+- **`PLUGIN_VERSION` was left at `0.4.0`** while `package.json` said `1.0.0`, so the
+  panel reported the wrong build. The constant is documented as needing to move with
+  `package.json`; it now matches.
+
+### Changed
+
+- The cue asks for brevity — incident and lesson each within 20 characters. Guidance,
+  not enforcement: the parser still accepts a 4–200 character incident and places no
+  bound on the lesson. It is kept in the cue because a captured entry is re-injected
+  on every later turn, so a shorter entry pays for itself many times over.
+
 ## [1.0.0] — 2026-10-15
 
 ### Fixed
@@ -24,20 +47,33 @@ Notable changes to `dsh-prompt-ErrorNotes-desk`. Format follows
 - **New confession format, replacing the `｜` separator with labelled fields:**
 
   ```
-  我发现了个错误：错误经过：<what actually happened> 教训：<one actionable rule>
+  我犯了个错误：错误经过：<what actually happened> 教训：<one actionable rule>
   ```
 
-  Both labels are required and their order is fixed, which is what rejects the
-  marker quotations above while still accepting how a confession is naturally
-  written. Either marker is accepted (`我发现了个错误` and `我犯了个错误`); the
-  earliest occurrence in the text wins. **The old `我犯了个错误：xxx｜yyy` format is
-  no longer captured.**
-- **The cue now asks for both fields explicitly**, states that a line missing either
-  label will not be captured, and gives a worked example. It also spells out that
-  the category is chosen in the panel rather than written into the line, which
-  answers "how do I fill in the library" at the point the model reads it.
-- The empty-state note in the panel and both READMEs were updated to the new
-  format.
+  Both labels are required, their order is fixed, and they must sit on the marker's
+  own line — which is what rejects the marker quotations above while still accepting
+  how a confession is naturally written. Either marker is accepted (`我犯了个错误`,
+  which the cue demonstrates, and `我发现了个错误`); the earliest occurrence in the
+  text wins. **The old `我犯了个错误：xxx｜yyy` format (separator, no labels) is no
+  longer captured.**
+- **The cue is now roughly a third of its former length.** It is injected on every
+  request, so its size is a per-turn cost for the whole session: the previous version
+  cost 349 characters (~188–302 tokens), most of it style advice the model only needs
+  to read once. What remains is what the parser *enforces* — both labels, their
+  order, and the one-line rule (a confession split across two lines is dropped with
+  no error, so omitting that rule would trade a silent failure for ~10 tokens). The
+  error-list heading and its truncation note are Chinese now as well, which is about
+  a third the length of the English for the same meaning.
+- **The cue asks for brevity**: incident and lesson should each stay within 20
+  characters. This is guidance, not enforcement — the parser still accepts an
+  incident of 4–200 characters and places no bound on the lesson. It is kept in the
+  cue despite being advice because a captured entry is re-injected on every later
+  turn, so a shorter entry pays for itself many times over.
+- The category is still chosen in the panel rather than written into the line, and
+  the cue says so, which answers "how do I fill in the library" at the point the
+  model reads it.
+- The empty-state note in the panel and both READMEs were updated to the new format,
+  and now show the injected cue verbatim.
 
 ## [0.4.0] — 2026-10-15
 
