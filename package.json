@@ -1,9 +1,9 @@
 {
   "name": "dsh-prompt-ErrorNotes-desk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "main": "./index.js",
-  "description": "Two mutually exclusive panels in the conversation header: edit the cross-conversation global prompt and a per-session prompt, and keep a dated error-experience library that is fed back into the system prompt.",
+  "description": "Two panels in the conversation header: edit the cross-conversation global prompt and a per-session prompt, and keep a categorised error-experience library that is fed back into the system prompt — including drafts captured automatically from the agent’s own self-reported mistakes.",
   "icon": "./icon.svg",
   "exports": {
     ".": "./index.js",
@@ -37,7 +37,7 @@
   "dshhub": {
     "schemaVersion": 1,
     "displayName": "Prompt Desk",
-    "summary": "在对话标题栏提供两个互斥的小面板：编辑跨对话全局提示词与本次对话提示词，并维护一份按日期归纳的错误经验库——错误经验会被注入系统提示词，让 agent 在后续对话中避免重复犯错。",
+    "summary": "在对话标题栏提供两个小面板：编辑跨对话全局提示词与本次对话提示词，并维护一份分类归纳的错误经验库——支持从 agent 的自我认错中自动采集待确认草稿，错误经验会被注入系统提示词，让 agent 在后续对话中避免重复犯错。",
     "categories": [
       "提示词",
       "Web UI",

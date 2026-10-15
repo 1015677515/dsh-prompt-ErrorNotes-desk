@@ -2,7 +2,7 @@
 
 > 本项目由 DeepSeek Harness 的 AI 智能体独立开发。
 
-对话标题栏里的两个小面板：编辑提示词、维护错误经验库。两者**互斥**——打开一个会自动关掉另一个。
+对话标题栏里的两个小面板：编辑提示词、维护错误经验库。
 
 [English](#english) | 中文
 
@@ -13,11 +13,11 @@
 | 面板 | 作用 |
 |---|---|
 | **提示词** | 编辑**跨对话**的全局提示词，以及**本次对话**的提示词（新对话会延续）。面板顶部显示哪一半当前正在生效。 |
-| **错误库** | 按日期归纳反复犯的错误：每条一个简短类型 + 一句教训。**最近 10 条（条数可自己设）会被注入系统提示词**，让后续对话以极低的 token 成本吸取教训。 |
+| **错误库** | **按分类**归纳反复犯的错误：每条一个简短类型 + 一句教训，归入三档分类之一。**最近 10 条（条数可自己设）会被注入系统提示词**，让后续对话以极低的 token 成本吸取教训。agent 说出「我犯了个错误：…」时会被自动捕获成待确认草稿。 |
 
-第二个面板的意义：一个反复犯同类错误的 agent，会在自己的上下文里收到一份简短的、带日期的提醒，成本远低于重新踩一遍坑再发现。
+第二个面板的意义：一个反复犯同类错误的 agent，会在自己的上下文里收到一份简短的、按分类归好的提醒，成本远低于重新踩一遍坑再发现。
 
-两个面板互斥，**点面板以外的空白处会自动关闭**（按 Esc 也可以）。
+**点面板以外的空白处会自动关闭**（按 Esc 也可以）。
 
 ## 安装
 
@@ -121,9 +121,65 @@ A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
 
 > 个别精简宿主可能不提供 `@deepseek-ai/schemastery`（设置表单由它生成）。那种情况下**功能不受影响**：面板里的输入框和 patch 的 `config` 都照常工作，只是设置里不会出现这个字段。
 
+## 错误经验库怎么分类
+
+每一条都归到三个一级分类之一。面板按分类折叠展示，每条右侧的下拉框可以随时改类：
+
+| 一级分类 | 含义 | 二级分类 |
+|---|---|---|
+| 判断与依据错误 | 想错了 | 验证缺位（没核实就下结论）、依据缺位（凭推测代替取证） |
+| 生成与操作错误 | 做错了 | 语法生成（模板串、转义、拼接）、工具与编码（选错工具或破坏编码） |
+| 其他 | 暂未归类 | —（本身就是终点，不再细分） |
+
+分类是**按补救手段**分的，不是按症状：每个二级分类都对应一个"下次换个做法"的具体动作，这样它才是可执行的，而不是描述性的。
+
+- 老条目（v1 没有分类字段）会统一落在**其他**，在面板里用下拉框手工归档即可。插件**不会**按文本猜分类——猜错比不猜更糟。
+- 分类 slug 写入时校验：手改状态文件写进一个不存在的分类，会被归到**其他**，不会污染面板。
+
+## 自动采集：你说"我犯了个错误"，它记下来
+
+开启错误库导出时，插件会在系统提示词里附一句固定的**认错句式引导**：
+
+```
+## 自我认错
+发现自身错误时用这一句式说出，插件会把它记入错误经验库、待用户确认：
+我犯了个错误：<错在哪>｜<以后怎么避免>
+```
+
+宿主半边监听助手的输出流，发现这个句式就把一条**草稿**放进面板顶部的「待确认」区，并在**错误库按钮上显示数字徽标**。草稿不会自动进库——必须点「采纳」；采纳前可以改措辞、选分类，或者直接「丢弃」。
+
+- 分隔符是**全角竖线** `｜`，不是 `|`：它不和 Markdown 表格、代码、以及教训文本里已有的箭头冲突。没写分隔符也能解析——整句会成为"错在哪"，教训留空由你补。
+- 一条消息**最多产生一条草稿**；同一句话重复出现只算一次；队列上限 20 条，旧的先丢。
+- 捕获到的内容若带尖括号（模型把模板本身回显出来），会被**直接丢弃**——否则会记下一条"错在哪 = `<错在哪>`"的垃圾。
+
+> 认错句式引导和错误经验列表由**同一个开关**控制：引导的存在就是为了喂这个库，库不注入时还留着引导，等于让 agent 对着空气认错。
+
+## 两个开关，位置刻意分开
+
+有两个都会"停止注入错误经验"的开关。它们**作用范围不同**，所以放在提示词面板的**上下两端**，而不是挨在一起：
+
+| 开关 | 位置 | 停什么 | 是否持久 |
+|---|---|---|---|
+| 临时暂停注入（等同 `/lessons off`） | 面板**顶部** | 只停**错误经验列表**；本次对话提示词与「自我认错」引导照常生效 | 否，**重载后自动恢复为开启** |
+| 错误库导出到系统提示词 | 面板**底部** | 停**错误经验列表 + 自我认错引导** | 是，写进 `state.json` |
+
+也可以在对话框里直接敲命令：
+
+```
+/lessons off     关闭（全局生效，跨对话）
+/lessons on      恢复
+/lessons         不带参数则翻转当前状态
+```
+
+> `/lessons` 是**全局**开关，且**重载后复位**——它的定位是"这一轮探索先别拿旧教训烦我"。要长期关掉，用面板底部的导出开关。参数写错会返回用法提示，不会静默翻转。
+
+## 你随时能看见"模型到底看到了什么"
+
+- **注入预览**：提示词面板里常驻一段等宽文本，就是插件对系统提示词的**完整贡献**，逐字发给模型。它和真实注入走**同一个构建函数**，所以两者不会各自漂移——这正是它存在的意义（只给一个"N 条"的统计数字，用户无法判断措辞对不对）。
+- **安装自检**：提示词面板顶部一行状态，报告宿主半边是否加载、HTTP 路由是否可达、状态文件在哪、当前注入几条、有没有待确认、以及**界面与宿主的版本是否一致**。版本不一致时会提示刷新页面——界面 bundle 和宿主是从两个地方加载的，重建后其中一个常常领先一个版本。
+
 ## 设计取舍
 
-- **互斥是结构性保证，不是靠"打开时去关另一个"实现的。** 两个按钮和两个面板在**同一个插槽注册**里、共用同一个 `openPanel` 状态。若拆成两个注册，每个面板各自持有 `useState`，"最多开一个"就得靠跨组件协调——那是等着出事的状态不同步。
 - **面板刻意用不透明底。** 用 `--dsw-static-neutral-bluish-*` 而不是 `--dsw-alias-bg-layer-*`：液态玻璃主题插件（例如 `dsh-plugin-wallpaper-engine`）会把后者重写成半透明膜，用它绘制的地方会透出壁纸，文字变得难读。
 - **磁盘上的状态一律不信任。** 每个字段读入时都校验，手改坏或写了一半的文件会退回默认值，而不是每次请求抛 `TypeError`。
 - **样式与注册都是 effect**，所以卸载插件（或 HMR 重载）会移除样式表与两个插槽注册。
@@ -137,6 +193,27 @@ A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
 - `PromptSection.text` 的类型是 `string | ((context: AssembleContext) => string)`。
 - `conversation.session.header.utilities` 是 `list` 类型、`session` 作用域的插槽；其组件收到的 props 是 `{ sessionId, useSessions }`。
 - 暗色主题的属性名是 `data-ds-dark-theme`。
+- `AssembleContext` **只有两个字段**：`{ scope?: ScopeKey; signal?: AbortSignal }`——**没有本轮用户消息，也没有激活工具集**。所以本插件不做上下文匹配；`text` 每次 assembly 都会被求值。
+- `systemPrompt.section()` 的 `text` 在每次 assembly 时求值：`SystemPrompt.assemble` 里是 `typeof section.text === 'function' ? section.text(context) : section.text`。
+- `ScopeKey` 是 `object`（不透明类型），而命令回调拿到的是 `invocation.agent.id`（字符串）。两者之间**没有取到可靠的映射**，所以 `/lessons` 做成全局开关，而不是会话级。
+- 事件 `agent/assistant-stream` 的载荷是 `{ agent, frame }`；`frame.chunk` 是 `StreamChunk`（`text-delta` 带 `text` 字段），`frame.outcome.kind` 为 `'committed' | 'abandoned'`。
+- `commands` 服务提供 `register(definition: CommandDefinition): () => void`；`CommandDefinition` 形如 `{ name, description, input?, recordInput?, handler }`；`CommandResult` 是 `{ kind: 'success', text? } | { kind: 'error', text }`。
+- **运行时已验证（2026-10-15，desktop profile）**：注册在插件全局 `ctx` 上的监听器**确实能收到** `Scoped<Agent>` 派发的 `agent/assistant-stream`。实测方式：在真实对话里输出一条认错句式，它被正确解析为待确认草稿并写入 `state.json`（`source: "auto"`）。
+
+## 运行时验证记录
+
+上面那节是读源码得出的结论；下面这些是**在真实 profile 里跑出来的**，两者分开列，因为读源码不能替代跑一遍：
+
+| 验证项 | 结果 |
+|---|---|
+| 宿主半边加载 | 插件成功激活，`GET /prompt-desk/state` 与 `/prompt-desk/pending` 均返回 200 |
+| v1 → v3 状态迁移 | 真实状态文件被升到 `version: 3`，老条目获得稳定 id 与分类字段 |
+| 自我认错自动采集 | 在真实对话里输出认错句式，被解析为待确认草稿（`source: "auto"`），**独立复现两次** |
+| 采纳草稿 + 改类 | 经面板采纳并改到「依据缺位」，正确落库、保留 `source: "auto"`、铸了新的唯一 id（未复用草稿 id） |
+| 临时暂停（面板入口） | 生产 POST 实测：`false` 后错误列表归零、**认错引导保留**；另一个独立请求复读仍为 `false`（证明是进程级共享状态） |
+| `/lessons off` / `on` | 会话日志出现 `command/run` → `command/done`，返回 `kind: "success"`，回显文字与预期一致 |
+
+> 已知的边界：`/lessons` 必须**单独成行**（`parseCommand` 的正则锚定在行首 `^/`）。写在句子中间或末尾不会被当作命令，而是普通消息文本。
 
 ## 许可证
 
@@ -150,7 +227,7 @@ MIT
 
 > Developed independently by an AI agent running on DeepSeek Harness.
 
-Two small panels in the DeepSeek Harness conversation header: edit prompts, keep an error-experience library. They are **mutually exclusive** — opening one closes the other.
+Two small panels in the DeepSeek Harness conversation header: edit prompts, keep an error-experience library.
 
 [中文](#dsh-prompt-errornotes-desk) | English
 
@@ -159,11 +236,11 @@ Two small panels in the DeepSeek Harness conversation header: edit prompts, keep
 | Panel | What it does |
 |---|---|
 | **Prompt** | Edits the cross-conversation global prompt and a per-session prompt that carries into the next conversation. Shows which half is currently reaching the model. |
-| **Error library** | A dated list of recurring mistakes — a short type plus a one-sentence lesson each. The most recent 10 (a configurable number) are injected into the system prompt, so a later turn can absorb them cheaply. |
+| **Error library** | Recurring mistakes grouped **by category** — a short type plus a one-sentence lesson each, filed under one of three top-level categories. The most recent 10 (a configurable number) are injected into the system prompt, so a later turn can absorb them cheaply. A message saying 「我犯了个错误：…」 is captured automatically as a draft awaiting confirmation. |
 
-The point of the second panel: an agent that keeps repeating the same class of mistake gets a short, dated reminder of it in its own context, at a token cost far below re-discovering the mistake.
+The point of the second panel: an agent that keeps repeating the same class of mistake gets a short, categorised reminder of it in its own context, at a token cost far below re-discovering the mistake.
 
-The two panels are mutually exclusive, and **clicking anywhere outside an open panel closes it** (Escape works too).
+**Clicking anywhere outside an open panel closes it** (Escape works too).
 
 ## Install
 
@@ -267,9 +344,65 @@ Only a **non-negative integer** is accepted: a negative, fractional or non-numer
 
 > A stripped-down host may not provide `@deepseek-ai/schemastery` — the package that renders the settings form. Nothing breaks in that case: the panel's field and the patch's `config` both keep working; the field simply does not appear in Settings.
 
+## How the library is categorised
+
+Every entry belongs to one of three top-level categories. The panel shows them as collapsible groups, and each row carries a dropdown so an entry can be re-filed at any time:
+
+| Category | Means | Sub-categories |
+|---|---|---|
+| 判断与依据错误 | thought it wrong | 验证缺位 (concluded without checking), 依据缺位 (substituted a guess for evidence) |
+| 生成与操作错误 | did it wrong | 语法生成 (template strings, escaping, concatenation), 工具与编码 (wrong tool, or broke the encoding) |
+| 其他 | not yet filed | — (a destination in its own right, not a parent) |
+
+The split is by **remedy**, not by symptom: each leaf names a concrete thing to do differently next time, which is what makes it actionable instead of merely descriptive.
+
+- Entries predating categories (a v1 file has no category field) land in **其他** and are filed by hand with the dropdown. The plugin **never** guesses a category from the text — guessing wrong is worse than not guessing.
+- Slugs are validated on write: a hand-edited file naming a category that does not exist lands in **其他** rather than polluting the panel.
+
+## Automatic capture: "我犯了个错误" gets recorded
+
+With export enabled, the plugin appends a fixed **confession cue** to the system prompt:
+
+```
+## 自我认错
+发现自身错误时用这一句式说出，插件会把它记入错误经验库、待用户确认：
+我犯了个错误：<错在哪>｜<以后怎么避免>
+```
+
+The Host watches the assistant's output stream; on seeing that phrasing it puts a **draft** into the 待确认 queue at the top of the panel and shows a **count badge on the 错误库 button**. A draft never enters the library by itself — you press 采纳, and you may rewrite the wording and pick a category first, or discard it.
+
+- The separator is the **fullwidth** `｜`, not `|`: it does not collide with markdown tables, code, or the arrows the lesson text already uses. A confession without it still parses — the whole line becomes the incident and you fill in the rule.
+- One message yields **at most one draft**; the same sentence repeating counts once; the queue is capped at 20, oldest dropped.
+- A capture containing angle brackets (the model echoing the template itself) is **dropped** — otherwise it would record an entry whose incident is literally `<错在哪>`.
+
+> The cue and the library are gated by the **same switch**: the cue exists to feed the library, so leaving it on with the library un-injected would ask the agent to confess into nothing.
+
+## Two switches, deliberately at opposite ends
+
+Two controls both stop error entries reaching the model. They differ in scope, so they sit at the **top and bottom** of the prompt panel rather than side by side:
+
+| Switch | Where | Stops | Persisted |
+|---|---|---|---|
+| 临时暂停注入 (equivalent to `/lessons off`) | panel **top** | only the **error list**; the session prompt and the confession cue stay in force | no — **resets to on after a reload** |
+| 错误库导出到系统提示词 | panel **bottom** | the **error list and the confession cue** together | yes, written to `state.json` |
+
+The same pause is reachable from the composer:
+
+```
+/lessons off     pause (global — every conversation)
+/lessons on      resume
+/lessons         toggle
+```
+
+> `/lessons` is **global** and **resets on reload** — it exists for "stop nagging me with old lessons during this exploration". To turn the feature off for good, use the export switch at the bottom of the panel. A mistyped argument returns usage instead of silently toggling.
+
+## You can always see what the model actually reads
+
+- **Injection preview**: a monospace block in the prompt panel showing the plugin's **entire contribution**, sent verbatim. It is produced by the **same builder** the assembler calls, so the two cannot drift — which is the whole point (a bare "N entries" count says nothing about the wording).
+- **Install self-check**: one status line at the top of the prompt panel reporting whether the Host half loaded, whether the HTTP route is reachable, where the state file lives, how many entries are injected, whether anything awaits confirmation, and **whether the panel and the Host are on the same version**. A mismatch tells you to refresh — the bundle and the Host are loaded by different machinery, so after a rebuild one is routinely a version ahead.
+
 ## Design notes
 
-- **Mutual exclusivity is structural, not enforced.** Both buttons and both panels live in one slot registration sharing one `openPanel` state. With two separate registrations each panel would own its own `useState`, and "at most one open" would need cross-component coordination — a desync waiting to happen.
 - **Opaque surfaces on purpose.** The panels use `--dsw-static-neutral-bluish-*` rather than `--dsw-alias-bg-layer-*`: a liquid-glass theme plugin (such as `dsh-plugin-wallpaper-engine`) rewrites those aliases into translucent films, so anything painted with them lets the wallpaper show through and the text becomes hard to read.
 - **State on disk is never trusted.** Every field is validated on read, so a hand-edited or half-written file degrades to defaults instead of raising a `TypeError` on each request.
 - **Styles and registrations are effects**, so unloading the plugin (or an HMR reload) removes the stylesheet and both slot registrations.
@@ -283,6 +416,27 @@ These were checked in source rather than assumed:
 - `PromptSection.text` is typed `string | ((context: AssembleContext) => string)`.
 - `conversation.session.header.utilities` is a `list`, session-scoped slot; its components receive `{ sessionId, useSessions }`.
 - The dark-theme attribute is `data-ds-dark-theme`.
+- `AssembleContext` has **exactly two fields**: `{ scope?: ScopeKey; signal?: AbortSignal }` — **no current user message and no active tool set**. The plugin therefore does no context matching; `text` is evaluated on every assembly.
+- `systemPrompt.section()`'s `text` is evaluated per assembly: `SystemPrompt.assemble` does `typeof section.text === 'function' ? section.text(context) : section.text`.
+- `ScopeKey` is `object` (opaque), while a command handler receives `invocation.agent.id` (a string). **No reliable mapping between the two was found**, so `/lessons` is a global switch rather than a per-session one.
+- The `agent/assistant-stream` payload is `{ agent, frame }`; `frame.chunk` is a `StreamChunk` (`text-delta` carries `text`), and `frame.outcome.kind` is `'committed' | 'abandoned'`.
+- The `commands` service exposes `register(definition: CommandDefinition): () => void`; `CommandDefinition` is `{ name, description, input?, recordInput?, handler }`; `CommandResult` is `{ kind: 'success', text? } | { kind: 'error', text }`.
+- **Verified at runtime (2026-10-15, desktop profile)**: a listener registered on the plugin's global `ctx` **does** receive `agent/assistant-stream`, whose dispatch is `Scoped<Agent>`. Verified by emitting a confession in a real conversation: it was parsed into a pending draft and written to `state.json` with `source: "auto"`.
+
+## Runtime verification log
+
+The section above is what reading the source established; the list below is what was **actually run in a real profile**. They are kept apart because reading source is not a substitute for running it:
+
+| Check | Result |
+|---|---|
+| Host half loads | The plugin activated; `GET /prompt-desk/state` and `/prompt-desk/pending` both returned 200 |
+| v1 → v3 state migration | A real state file was upgraded to `version: 3`, with legacy entries gaining stable ids and category fields |
+| Automatic capture | A confession emitted in a real conversation was parsed into a pending draft (`source: "auto"`) — **reproduced twice independently** |
+| Accept a draft + re-file it | Accepted through the panel and re-filed to 依据缺位: persisted correctly, kept `source: "auto"`, and minted a fresh unique id rather than reusing the draft's |
+| Temporary pause (panel entry) | Measured over a production POST: after `false` the error list dropped to zero while the **confession cue stayed**; an independent follow-up request still read `false`, proving it is process-wide shared state |
+| `/lessons off` and `/on` | The session log shows `command/run` → `command/done` returning `kind: "success"`, with the expected reply text |
+
+> A known boundary: `/lessons` must be **on its own line** (`parseCommand`'s pattern is anchored at the start, `^/`). Written mid-sentence or at the end of a longer message it is ordinary prose, not a command.
 
 ## Licence
 
