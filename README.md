@@ -80,7 +80,7 @@ A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
 
 | 依赖 | 要求 |
 |---|---|
-| DSH | `>=0.2.0-rc.1` |
+| DSH | `>=0.2.0-rc.1 || >=0.3.0-rc.1 || >=0.4.0-rc.1 || >=0.5.0-rc.1 || >=1.0.0-rc.1` |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | HTTP 服务 | 必需。宿主半边注册 `GET\|POST /prompt-desk/state`，浏览器半边靠它读写。没有 HTTP 服务的 profile 会加载插件但保持不活动，而不是报错 |
 
@@ -321,7 +321,7 @@ This is the convenient path while developing: a local install is wired in as a d
 
 | Dependency | Requirement |
 |---|---|
-| DSH | `>=0.2.0-rc.1` |
+| DSH | `>=0.2.0-rc.1 || >=0.3.0-rc.1 || >=0.4.0-rc.1 || >=0.5.0-rc.1 || >=1.0.0-rc.1` |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | HTTP server | Required. The host half registers `GET\|POST /prompt-desk/state`; the browser half reads and writes through it. A profile without an HTTP server loads the plugin and it stays inactive rather than failing |
 

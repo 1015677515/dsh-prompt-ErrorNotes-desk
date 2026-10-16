@@ -4,6 +4,21 @@ Notable changes to `dsh-prompt-ErrorNotes-desk`. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] — 2026-10-16
+
+### Fixed
+
+- **The declared DSH compatibility range silently excluded every future
+  prerelease.** `engines.dsh` and `dshhub.compatibility.dsh` read `>=0.2.0-rc.1`,
+  which matches the current `0.2.0-rc.2` but not `0.3.0-rc.1` — node-semver only
+  lets a prerelease satisfy a range when some comparator sits on the *same*
+  `major.minor.patch` tuple and carries a prerelease tag of its own, and that range
+  has such a comparator only on `0.2.0`. Measured: `0.3.0-rc.1`, `0.4.0-rc.1`,
+  `0.5.0-rc.1` and `1.0.0-rc.1` all came back false. The range now carries an
+  explicit prerelease branch per minor version, which is what the marketplace's
+  contributing guide asks for. Only `2.0.0-rc.1` remains outside it — a major
+  version bump is a deliberate re-declaration, not something to pre-empt.
+
 ## [1.1.0] — 2026-10-15
 
 ### Fixed
