@@ -8,6 +8,14 @@ Notable changes to `dsh-prompt-ErrorNotes-desk`. Format follows
 
 ### Fixed
 
+- **`CLIENT_VERSION` was left at `0.4.0`**, so the panel reported
+  "界面与宿主版本不一致（界面 0.4.0，宿主 1.1.1）" on every load and asked the user
+  to refresh — which could not help, because the stale number was in the source
+  rather than a caching artefact. This is the **second** version constant to be
+  missed (the first was `PLUGIN_VERSION` in 1.0.0); the two halves are loaded by
+  different machinery and each carries its own build identity, documented as
+  "Bump it with package.json". Both are now checked against `package.json` by the
+  release script, so the next bump cannot silently skip one.
 - **The declared DSH compatibility range silently excluded every future
   prerelease.** `engines.dsh` and `dshhub.compatibility.dsh` read `>=0.2.0-rc.1`,
   which matches the current `0.2.0-rc.2` but not `0.3.0-rc.1` — node-semver only
