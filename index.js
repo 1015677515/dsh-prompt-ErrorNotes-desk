@@ -82,7 +82,7 @@ const MAX_INJECT_LIMIT = 200;
  * the other. Publishing this lets the panel say so outright instead of defending
  * every field against an older peer. Bump it with package.json.
  */
-const PLUGIN_VERSION = '1.1.1';
+const PLUGIN_VERSION = '1.1.3';
 
 /**
  * Current on-disk state shape.
@@ -341,7 +341,13 @@ function emptyState() {
     sessionPrompt: '',
     errors: [],
     pending: [],
-    ui: { showPrompt: true, showErrors: false },
+    /*
+     * `showPreview` is false by default: the injected text is the tallest part of
+     * the prompt panel, and a first-time user opening it to edit a prompt should
+     * land on the two boxes they came for, not on a wall of assembled text. The
+     * panel offers a 显示 button on the same row as the label.
+     */
+    ui: { showPrompt: true, showErrors: false, showPreview: false },
     /*
      * Whether the error library (and the confession cue that feeds it) is exported
      * into the system prompt. On by default: the library only earns its keep by
@@ -474,6 +480,9 @@ function sanitizeState(raw) {
   if (raw.ui !== null && typeof raw.ui === 'object') {
     if (typeof raw.ui.showPrompt === 'boolean') out.ui.showPrompt = raw.ui.showPrompt;
     if (typeof raw.ui.showErrors === 'boolean') out.ui.showErrors = raw.ui.showErrors;
+    // Absent means "hidden", which is also `emptyState`'s value — so a v1–v3 file
+    // opens with the preview collapsed instead of suddenly growing a taller panel.
+    if (typeof raw.ui.showPreview === 'boolean') out.ui.showPreview = raw.ui.showPreview;
   }
 
   // Absent (a v1 file) means "still exported", which is what v1 did unconditionally.
@@ -775,6 +784,7 @@ function applyPatch(patch, configLimit) {
     if (patch.ui !== null && typeof patch.ui === 'object') {
       if (typeof patch.ui.showPrompt === 'boolean') state.ui.showPrompt = patch.ui.showPrompt;
       if (typeof patch.ui.showErrors === 'boolean') state.ui.showErrors = patch.ui.showErrors;
+      if (typeof patch.ui.showPreview === 'boolean') state.ui.showPreview = patch.ui.showPreview;
     }
 
     /*

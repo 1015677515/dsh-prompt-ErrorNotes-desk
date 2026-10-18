@@ -33,7 +33,7 @@ window.__ModuleLoader__.load({
      * version ahead of the other. Saying so outright is better than defending every
      * field against an older peer. Bump it with package.json.
      */
-    const CLIENT_VERSION = '1.1.1';
+    const CLIENT_VERSION = '1.1.3';
 
     /** Badge poll interval; the header badge must stay current with both panels shut. */
     const POLL_MS = 10000;
@@ -46,6 +46,63 @@ window.__ModuleLoader__.load({
      * where a stale bundle is talking to an older Host that sends no `categories`.
      */
     const OTHER = 'other';
+
+    /*
+     * The dragged heights, kept per box in `localStorage`.
+     *
+     * Deliberately NOT in `state.json`: that file is the plugin's durable state —
+     * the session prompt, the error library, whether injection is on — and a box
+     * height is a property of this browser window, not of the conversation. Storing
+     * it server-side would also make two machines fight over it, and would cost a
+     * round-trip on every drag end for a purely visual value.
+     *
+     * Namespaced per box so the two can differ: the global prompt is usually the
+     * longer document and is dragged taller than the session one.
+     */
+    const HEIGHT_KEYS = {
+      global: 'pd.height.globalPrompt',
+      session: 'pd.height.sessionPrompt',
+    };
+
+    /*
+     * Bounds on a remembered height. The lower one is a floor below both editors'
+     * CSS `min-height` (84px and 72px) — anything smaller is a corrupted value,
+     * since CSS would override it anyway and the box would silently disagree with
+     * what was stored. It must stay at or under the *smaller* editor's min-height:
+     * set higher, a height stored between the two bounds would be rejected on
+     * reload and the box would snap back with no explanation. The upper one is a
+     * sanity cap, so a hand-edited entry (a `99999`, a stray string) cannot produce
+     * a box taller than any screen.
+     * Out-of-range values are discarded rather than clamped: a stored `0` should be
+     * forgotten and replaced by the default, not reinterpreted as "the smallest".
+     */
+    const HEIGHT_MIN = 44;
+    const HEIGHT_MAX = 1200;
+
+    /** Read one remembered editor height, or `undefined` when there is none usable. */
+    function readHeight(key) {
+      try {
+        const raw = window.localStorage.getItem(key);
+        if (raw === null) return undefined;
+        const value = Number(raw);
+        if (!Number.isFinite(value)) return undefined;
+        if (value < HEIGHT_MIN || value > HEIGHT_MAX) return undefined;
+        return Math.round(value);
+      } catch {
+        // Private-browsing modes throw on access rather than returning null. A box
+        // that just does not remember is the correct degradation.
+        return undefined;
+      }
+    }
+
+    /** Persist one editor height. Failure is silent for the same reason as above. */
+    function writeHeight(key, value) {
+      try {
+        window.localStorage.setItem(key, String(Math.round(value)));
+      } catch {
+        /* no storage: the drag still works, it just will not survive a reload */
+      }
+    }
 
     /**
      * Panel styles. Literal colors appear only as fallbacks *behind* a
@@ -95,7 +152,7 @@ window.__ModuleLoader__.load({
        * keep this correct on a host without the pair.
        */
       '.pd-panel{position:absolute;top:calc(100% + 6px);right:0;z-index:40;width:560px;',
-      'max-height:70vh;overflow:auto;padding:12px;border-radius:10px;box-sizing:border-box;',
+      'max-height:82vh;overflow:auto;padding:12px;border-radius:10px;box-sizing:border-box;',
       'border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));',
       'background:var(--dsw-static-neutral-bluish-00,#ffffff);',
       'color:var(--dsw-alias-label-primary,inherit);',
@@ -117,21 +174,90 @@ window.__ModuleLoader__.load({
       'background:var(--dsw-static-neutral-bluish-00,#ffffff);color:inherit}',
       'body[data-ds-dark-theme] .pd-area{background:var(--dsw-static-neutral-bluish-875,#1e1f26)}',
       '.pd-area::placeholder{color:var(--dsw-alias-label-tertiary,rgba(128,128,128,.9))}',
+      /*
+       * The prompt editors get their own height because `.pd-area` is shared with the
+       * one-line fields (an `<input>` for the type, a number box for the cap), which
+       * override it inline. Bumping `.pd-area` itself would drag those along; this
+       * class raises only the two boxes a user actually types paragraphs into.
+       *
+       * Order is load-bearing: these override `.pd-area`'s `min-height` on equal
+       * specificity, so they must stay below it in this rule list. That was true
+       * before too, but it only became load-bearing now — 84px is *smaller* than the
+       * 96px base, so moving these above it would not just lose the override, it
+       * would leave the boxes taller than requested.
+       *
+       * These are the start heights AND the drag floors — `DragTextarea` reads the
+       * computed `min-height` off the element rather than assuming a constant, so
+       * whatever is written here is the true lower bound. `HEIGHT_MIN` (declared
+       * near the top of this file) must stay at or under the smaller one, or a
+       * remembered height in that gap would be rejected on reload and the box would
+       * silently snap back.
+       */
+      '.pd-grow{min-height:84px}',
+      '.pd-grow-sm{min-height:72px}',
+      /*
+       * Height-draggable prompt editors.
+       *
+       * The browser's own `resize:vertical` handle cannot be the one used here, for
+       * two reasons that both matter. Its hit area is rendered by the browser and
+       * cannot be sized — `::-webkit-resizer` accepts a background and nothing else —
+       * so two boxes meant to feel alike would sit in two different-sized targets.
+       * And the height it writes goes into an inline style on a node that
+       * `PanelShell` destroys whenever the panel closes, so it could never be
+       * remembered. The native handle is therefore switched off and this grip is
+       * drawn in its place: one `--pd-grip` size for every editor, and a height the
+       * component below owns.
+       *
+       * The chevrons are drawn with `currentColor`, which the span inherits from the
+       * panel — so they follow the light/dark label colour without a second rule.
+       */
+      '.pd-resize{position:relative;display:block;width:100%}',
+      '.pd-resize > .pd-area{resize:none;display:block}',
+      '.pd-grip{position:absolute;right:1px;bottom:1px;width:var(--pd-grip,18px);',
+      'height:var(--pd-grip,18px);cursor:ns-resize;touch-action:none;',
+      'border-bottom-right-radius:5px;opacity:.55;',
+      'background:',
+      'linear-gradient(to top left,transparent 0 62%,currentColor 62% 70%,transparent 70% 100%),',
+      'linear-gradient(to top left,transparent 0 38%,currentColor 38% 46%,transparent 46% 100%)}',
+      '.pd-grip:hover{opacity:.85}',
       '.pd-row{display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap}',
+      /*
+       * The preview's header: a label and its show/hide button on one line. The
+       * shared `.pd-label` carries a 10px top margin meant for a label *above* a
+       * field, which here would push the row away from the button that belongs to
+       * it — so this row zeroes it and the label drops its own.
+       */
+      '.pd-row-tight{margin-top:2px;justify-content:space-between;gap:6px}',
+      '.pd-label-inline{margin:0}',
       '.pd-primary{padding:4px 12px;border-radius:6px;cursor:pointer;font-size:12px;',
       'border:1px solid transparent;background:var(--dsw-alias-state-business-primary,#4f8cff);',
       'color:var(--dsw-alias-label-primary-inverted,#fff)}',
       '.pd-ghost{padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px;',
       'border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));',
       'background:transparent;color:inherit}',
+      /*
+       * Must come AFTER `.pd-ghost`: both are single-class selectors, so the later
+       * rule wins on the properties it sets. Declared before it, `padding` and
+       * `font-size` here would be silently overridden and the button would render at
+       * full size despite this class being on it.
+       */
+      '.pd-ghost-xs{padding:1px 8px;font-size:11px;line-height:1.6}',
       '.pd-note{font-size:11px;color:var(--dsw-alias-label-secondary,inherit)}',
       '.pd-fail{font-size:12px;color:var(--dsw-alias-state-business-danger,#d33)}',
       /*
        * The injected-text preview. Monospace because the point of showing it is to
        * let the user judge the exact wording and line breaks the model receives —
        * which a proportional font hides.
+       *
+       * Resizable: `resize` only takes effect on an element whose overflow is not
+       * `visible`, which this already had. The old `max-height:220px` had to go —
+       * a cap stops the drag dead part-way, so the box grew a handle that could not
+       * move. A definite start height plus `max-height:none` lets the user drag it
+       * either way, and `overflow:auto` keeps a long section from pushing the rest
+       * of the panel off-screen.
        */
-      '.pd-mono{margin:0;padding:8px;border-radius:6px;max-height:220px;overflow:auto;',
+      '.pd-mono{margin:0;padding:8px;border-radius:6px;height:260px;min-height:120px;',
+      'max-height:none;resize:vertical;overflow:auto;display:block;box-sizing:border-box;',
       'font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;',
       'line-height:1.5;white-space:pre-wrap;word-break:break-word;',
       'border:1px solid var(--dsw-alias-border-l3,rgba(128,128,128,.2));',
@@ -320,6 +446,127 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * A prompt editor whose height the user can drag, remembered across reloads.
+     *
+     * The drag is implemented with pointer capture rather than by listening on
+     * `document`: capture keeps delivering `pointermove` to the grip even once the
+     * pointer has left the 18px square — which it does immediately, since dragging
+     * up means leaving the grip downwards — and it releases itself on `pointerup`
+     * anywhere, including outside the window.
+     *
+     * The height is committed to `localStorage` once, on `pointerup`, not on every
+     * move: sixty writes a second would be pointless work for a value nothing reads
+     * until the next mount.
+     */
+    function DragTextarea(props) {
+      const heightKey = props.heightKey;
+      const [height, setHeight] = React.useState(() => readHeight(heightKey));
+
+      /*
+       * A drag that starts here must be captured, and the tick on the first move is
+       * where the pointer's starting offset and the box's starting height are
+       * recorded. Both live in a ref rather than state because they must not cause a
+       * re-render mid-gesture — the box is resized through `setHeight` instead, and a
+       * second source of truth would fight it.
+       */
+      const dragRef = React.useRef(null);
+
+      const onPointerDown = (event) => {
+        // Left button only: a right-click on the grip should open the context menu
+        // rather than start a drag that no `pointerup` will ever end.
+        if (event.button !== 0) return;
+        event.preventDefault();
+        const box = event.currentTarget.parentElement;
+        if (box === null) return;
+        const field = box.querySelector('textarea');
+        if (field === null) return;
+        const rect = field.getBoundingClientRect();
+        /*
+         * The floor is the box's own CSS `min-height`, read here rather than assumed:
+         * `.pd-grow` (84px) and `.pd-grow-sm` (72px) differ, and clamping both to
+         * one constant would let the smaller box be dragged under its own minimum —
+         * the height would be stored but visually ignored, and the drag would appear
+         * to do nothing for its first 12 pixels.
+         */
+        const min = Number.parseFloat(window.getComputedStyle(field).minHeight);
+        dragRef.current = {
+          startY: event.clientY,
+          startHeight: rect.height,
+          min: Number.isFinite(min) && min > 0 ? min : HEIGHT_MIN,
+        };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      };
+
+      const onPointerMove = (event) => {
+        const drag = dragRef.current;
+        if (drag === null) return;
+        const next = Math.max(drag.min, Math.min(HEIGHT_MAX,
+          drag.startHeight + (event.clientY - drag.startY)));
+        drag.last = next;
+        setHeight(next);
+      };
+
+      const onPointerUp = (event) => {
+        const drag = dragRef.current;
+        if (drag === null) return;
+        dragRef.current = null;
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        /*
+         * Written from the ref, not from inside a state updater. A `setHeight`
+         * callback that also persists is a side effect in what React is allowed to
+         * call more than once, and under `StrictMode` it would double-write; the ref
+         * already holds the exact height the last move produced.
+         */
+        if (drag.last !== undefined) writeHeight(heightKey, drag.last);
+      };
+
+      /*
+       * The safety net. If the capture is lost without a `pointerup` — the pointer
+       * left the window, the element was removed mid-gesture, the OS took the
+       * pointer away — the move handler above would otherwise keep resizing on every
+       * subsequent hover, because nothing had cleared the ref. Committing here makes
+       * the lost gesture end the same way a released one does; the `dragRef === null`
+       * guard makes it a no-op when `onPointerUp` already ran.
+       */
+      const onLostCapture = () => {
+        const drag = dragRef.current;
+        if (drag === null) return;
+        dragRef.current = null;
+        if (drag.last !== undefined) writeHeight(heightKey, drag.last);
+      };
+
+      /*
+       * The grip is `aria-hidden` and not focusable. It is a mouse affordance by
+       * nature — a keyboard user cannot meaningfully "drag" — and exposing it to the
+       * accessibility tree as a control that does nothing when activated would be
+       * worse than hiding it. Nothing it does is unavailable another way: the box
+       * still scrolls, and the height is cosmetic.
+       */
+      return h('div', { className: 'pd-resize' },
+        h('textarea', {
+          className: 'pd-area ' + props.className,
+          style: height === undefined ? undefined : { height: height + 'px' },
+          value: props.value,
+          spellCheck: false,
+          'aria-label': props.label,
+          onChange: props.onChange,
+        }),
+        h('span', {
+          className: 'pd-grip',
+          'aria-hidden': 'true',
+          // The whole point of the grip: a stable hit area identical on every box.
+          title: '拖动调整高度',
+          onPointerDown,
+          onPointerMove,
+          onPointerUp,
+          onPointerCancel: onPointerUp,
+          onLostPointerCapture: onLostCapture,
+        }));
+    }
+
+    /**
      * Every legal category as a flat `{value,label}` list, in the Host's declared order.
      *
      * A group that declares no leaves contributes one option under its own bare id.
@@ -388,11 +635,31 @@ window.__ModuleLoader__.load({
       const [sessionDraft, setSessionDraft] = React.useState('');
       const [status, setStatus] = React.useState('');
 
+      /*
+       * Seeded `false` to match the Host's default for a state file with no stored
+       * preference, then corrected as soon as a payload arrives.
+       */
+      const [showPreview, setShowPreview] = React.useState(false);
+
+      /*
+       * Deliberately NOT `save()`: that helper replaces `data`, which re-runs the
+       * seeding effect below and would overwrite whatever the user has typed into
+       * the two prompt boxes but not saved yet. Hiding the preview must not be able
+       * to discard an unsaved prompt edit. Posting straight to the Host keeps the
+       * write, keeps the local flag authoritative, and touches nothing else; if the
+       * write fails the box is simply back on the next reload.
+       */
+      const persistPreview = (next) => {
+        setShowPreview(next);
+        apiPost({ ui: { showPreview: next } }).catch(() => {});
+      };
+
       // Seed the drafts whenever a fresh payload arrives.
       React.useEffect(() => {
         if (data === null) return;
         setGlobalDraft(data.globalPrompt || '');
         setSessionDraft(data.sessionPrompt || '');
+        setShowPreview(!!(data.ui && data.ui.showPreview));
       }, [data]);
 
       const commit = (which) => {
@@ -449,10 +716,11 @@ window.__ModuleLoader__.load({
 
           h('label', { className: 'pd-label' }, '全局提示词（跨对话，生效于所有工作区）'),
           h('div', { className: 'pd-path' }, data.globalPromptPath || ''),
-          h('textarea', {
-            className: 'pd-area',
+          h(DragTextarea, {
+            className: 'pd-grow',
+            heightKey: HEIGHT_KEYS.global,
+            label: '全局提示词',
             value: globalDraft,
-            spellCheck: false,
             onChange: (e) => setGlobalDraft(e.target.value),
           }),
           h('div', { className: 'pd-row' },
@@ -463,10 +731,11 @@ window.__ModuleLoader__.load({
             }, '撤销修改')),
 
           h('label', { className: 'pd-label' }, '本次对话提示词（新对话会延续）'),
-          h('textarea', {
-            className: 'pd-area',
+          h(DragTextarea, {
+            className: 'pd-grow-sm',
+            heightKey: HEIGHT_KEYS.session,
+            label: '本次对话提示词',
             value: sessionDraft,
-            spellCheck: false,
             onChange: (e) => setSessionDraft(e.target.value),
           }),
           h('div', { className: 'pd-row' },
@@ -477,12 +746,34 @@ window.__ModuleLoader__.load({
             }, '清空'),
             status ? h('span', { className: 'pd-note' }, status) : null),
 
-          h('label', { className: 'pd-label' }, '下一轮实际注入的文本（只读）'),
-          preview === null || preview.sectionText === ''
-            ? h('div', { className: 'pd-note pd-empty' }, '（当前为空，不会有任何内容注入）')
-            : h('pre', { className: 'pd-mono' }, preview.sectionText),
-          preview !== null && preview.sectionText !== '' ? h('div', { className: 'pd-note' },
-            '以上即为插件对系统提示词的完整贡献，逐字发送给模型。') : null,
+          /*
+           * Hidden by default, and the choice is written to the state file rather
+           * than kept in this component. The preview is tall (it is the whole
+           * assembled section), so on a small screen it pushes the export switch —
+           * the control most users came for — below the fold every single time.
+           * Persisting the preference is what makes hiding it once enough; a
+           * component-local flag would forget on every reload and the box would be
+           * back, in the way, the next time the panel opened.
+           *
+           * `undefined` on a state file written before this field existed reads as
+           * "hidden" — the same default as a fresh install, so there is no upgrade
+           * where the panel suddenly gets taller.
+           */
+          h('div', { className: 'pd-row pd-row-tight' },
+            h('label', { className: 'pd-label pd-label-inline' }, '下一轮实际注入的文本（只读）'),
+            h('button', {
+              type: 'button', className: 'pd-ghost pd-ghost-xs',
+              onClick: () => persistPreview(!showPreview),
+              'aria-pressed': showPreview ? 'true' : 'false',
+            }, showPreview ? '隐藏' : '显示')),
+          showPreview
+            ? (preview === null || preview.sectionText === ''
+              ? h('div', { className: 'pd-note pd-empty' }, '（当前为空，不会有任何内容注入）')
+              : h(React.Fragment, null,
+                h('pre', { className: 'pd-mono' }, preview.sectionText),
+                h('div', { className: 'pd-note' },
+                  '以上即为插件对系统提示词的完整贡献，逐字发送给模型。')))
+            : null,
 
           /*
            * The durable switch, at the bottom — the counterpart to the temporary pause

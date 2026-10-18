@@ -4,6 +4,52 @@ Notable changes to `dsh-prompt-ErrorNotes-desk`. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.3] — 2026-10-18
+
+### Changed
+
+- **两个提示词框的高度会记住，且右下角把手统一。** 之前用的是浏览器原生
+  `resize:vertical`，它有两个无法绕开的限制：把手由浏览器渲染，`::-webkit-resizer`
+  只接受 `background`、**改不了命中面积**（所以两个框的把手天然不一样大）；而它写入
+  的是节点内联样式，面板一关 `PanelShell` 就把节点销毁，高度不可能留住。
+  现在关闭原生 `resize`，改由 `client.js` 自绘 `.pd-grip` 把手接管拖拽：两个框共用
+  `--pd-grip`（18px）尺寸，命中面积逐像素一致；高度按框分别存 `localStorage`
+  （`pd.height.globalPrompt` / `pd.height.sessionPrompt`），关面板、刷新页面都保持。
+  拖拽用 pointer capture 实现，指针移出把手后仍继续跟随，`pointerup` 收尾——高度只在
+  那一刻落盘一次，不在拖动过程中反复写。
+  高度**不**进 `state.json`：它是这台浏览器的窗口属性，不是对话状态，也不该让两台机器
+  互相覆盖。读取时校验范围（44–1200px），损坏或手改过的值退回默认高度而不是撑爆面板；
+  `localStorage` 不可用（隐私模式）时拖拽照常，只是不记忆。
+  刻意没动注入文本预览的 `.pd-mono`：它仍用原生把手，且按你的要求不参与记忆。
+  两个框的起始高度同时减半：`.pd-grow` 168→84px、`.pd-grow-sm` 144→72px，校验下限
+  随之 88→44px。这两条规则仍是 `min-height` 覆盖 `.pd-area` 的 96px 基值——84/72 比
+  96 更小，所以**顺序变成承重条件**，写在 `.pd-area` 之前就不再是"没生效"，而是两个框
+  反而比基值更高。
+
+## [1.1.2] — 2026-10-18
+
+### Changed
+
+- **三个文本框都能竖向拖拽，默认也更高。** 全局提示词与本次对话提示词原本就带
+  `resize:vertical`，但 `.pd-area` 的 `min-height:96px` 只够三行，看上去像"不能调"；
+  现在两者分别用 `.pd-grow`（168px）与 `.pd-grow-sm`（144px）抬高起点，仍可向下拖。
+  注入文本预览原本是 `<pre class="pd-mono">`，其 `max-height:220px` 会把拖拽卡死在
+  半路——把手在动、框不变。改为 `height:260px;min-height:120px;max-height:none` 并
+  补 `resize:vertical`（`resize` 只对 `overflow != visible` 的元素生效，而它本来就有
+  `overflow:auto`）。
+  刻意没有动 `.pd-area` 本身：它还被草稿卡的两个 `<input>` 和条数上限的数字框复用，
+  那些都用内联 `minHeight:auto` 压回单行——抬高共享类会把它们一起变高。
+
+### Added
+
+- **「下一轮实际注入的文本」可以隐藏，且默认隐藏。** 该区块是面板里最高的一块，
+  在笔记本屏幕上会把底部的导出开关顶出视野。标签行右侧新增「隐藏 / 显示」按钮；
+  状态写入 `state.json` 的 `ui.showPreview`（与既有的 `ui.showPrompt` /
+  `ui.showErrors` 同构，因此 `sanitizeState` 与 `applyPatch` 各加一行即可），刷新、
+  重开面板都保持。旧状态文件没有该字段时按 `false` 读取，与全新安装一致，
+  不会出现"升级后面板突然变高"。
+  拖动出来的高度**不**记忆：那是纯视觉偏好，重新打开回到默认高度。
+
 ## [1.1.1] — 2026-10-16
 
 ### Fixed
