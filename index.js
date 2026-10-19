@@ -82,7 +82,7 @@ const MAX_INJECT_LIMIT = 200;
  * the other. Publishing this lets the panel say so outright instead of defending
  * every field against an older peer. Bump it with package.json.
  */
-const PLUGIN_VERSION = '1.1.3';
+const PLUGIN_VERSION = '1.2.0';
 
 /**
  * Current on-disk state shape.
@@ -213,8 +213,18 @@ const CUE_BODY = [
   '发现自身错误时，**必须**主动用下面这一行汇报：',
   '我犯了个错误：错误经过：<当时实际发生了什么> 教训：<以后怎么做，一句可执行的规则>',
   '两个标签缺一不可、顺序固定，且必须写在同一行；缺任一标签或换行都不会被捕获。分类由用户在面板里选。',
-  '错误经过与教训都要简洁，各控制在 20 字以内。',
+  '错误经过 20 字以内，只写这次发生了什么；教训 40 字以内，但要写成换任务、换文件也成立的规则，不提本次的文件名、路径、命令或具体数值。',
 ].join('\n');
+
+/**
+ * A lesson longer than this is accepted but flagged in the panel.
+ *
+ * Guidance, not enforcement — see {@link MAX_INCIDENT_CHARS} for the one field that
+ * IS validated. The number lives here rather than only inside {@link CUE_BODY} so the
+ * panel can flag an over-long lesson with the same threshold the model was told,
+ * instead of a second copy of "40" that would drift.
+ */
+const LESSON_ADVICE_MAX = 40;
 
 /**
  * Markers that open a confession. Either is accepted; the earliest occurrence in
@@ -563,9 +573,10 @@ function effectiveInjectLimit(state, configLimit) {
  *
  * Deliberately terse and imperative. The rules that shape it:
  *
- *   · **Type + lesson only** — the stored `detail` explains the incident but is
- *     not injected. It is the most token-expensive field and the least
- *     actionable; the lesson is the distilled instruction.
+ *   · **Lesson only** — neither the stored `detail` (the incident's explanation) nor
+ *     `type` (the incident's headline) is injected. Both describe one moment; only
+ *     the lesson states a rule that transfers to the next task. `detail` is also the
+ *     most token-expensive field. Entries with no lesson are skipped entirely.
  *   · **Newest first** — a fresh mistake is more likely to recur than an old one,
  *     so when the limit truncates, the oldest entries are the ones dropped.
  *   · **Export is one switch** — the library and the confession cue are gated by
@@ -592,33 +603,58 @@ function buildSectionText(state, configLimit, { lessonsEnabled = true } = {}) {
 
   let errorBlock = '';
   let injectedCount = 0;
-  if (state.exportToPrompt && lessonsEnabled && state.errors.length > 0 && limit > 0) {
-    const recent = state.errors.slice(-limit).reverse();
+
+  /*
+   * Entries that carry a lesson are the only ones that can be injected; everything
+   * else is a story with no rule extracted from it yet.
+   *
+   * Computed unconditionally, before the export switch is consulted: the panel
+   * reports "N of M injectable entries" even while injection is paused, and a
+   * number that only exists while the switch is on would read as zero the moment
+   * the user turns it off — exactly when they are looking at it to decide.
+   */
+  const injectable = state.errors.filter((entry) => (entry.lesson || '').trim() !== '');
+
+  if (state.exportToPrompt && lessonsEnabled && injectable.length > 0 && limit > 0) {
+    /*
+     * Only the lesson is injected — not the incident that produced it.
+     *
+     * The incident is a story about one moment ("上次改 package.json 时用了
+     * PowerShell"), and a story is only actionable if the next task happens to look
+     * like that moment. The lesson is the rule the story was supposed to teach, and
+     * a rule travels. Entries without a lesson therefore carry nothing transferable
+     * and are skipped rather than injected as a bare incident; the panel marks them
+     * so the user can fill the lesson in.
+     *
+     * The filter runs BEFORE the limit, so the limit counts entries that are
+     * actually injected. Slicing first would let a few lesson-less entries silently
+     * consume the budget and quietly shrink the block.
+     */
+    const recent = injectable.slice(-limit).reverse();
     injectedCount = recent.length;
-    const lines = recent.map((entry) => {
-      const type = (entry.type || '').trim();
-      const lesson = (entry.lesson || '').trim();
-      if (type !== '' && lesson !== '') return `- ${type} → ${lesson}`;
-      return `- ${type || lesson}`;
-    });
+    const lines = recent.map((entry) => `- ${(entry.lesson || '').trim()}`);
     /*
      * Title and trailer are Chinese and short on purpose: this block is re-sent on
      * every request, so every character is a per-turn cost. The English title
      * ("Mistakes you have made before — do not repeat them") and the English
      * truncation note cost roughly 3x their Chinese equivalents for the same
      * meaning, and the entries themselves are already Chinese.
+     *
+     * The denominator is the injectable count, not `state.errors.length`: saying
+     * "共 8 条" while two of them cannot be injected would misdescribe what the
+     * number is counting.
      */
     errorBlock = '## 别重犯以下错误\n'
       + lines.join('\n')
-      + (state.errors.length > limit
-        ? `\n（仅显示最近 ${limit} 条，共 ${state.errors.length} 条。）`
+      + (injectable.length > limit
+        ? `\n（仅显示最近 ${limit} 条，共 ${injectable.length} 条。）`
         : '');
   }
 
   const cueBlock = state.exportToPrompt ? `${CUE_TITLE}\n${CUE_BODY}` : '';
 
   const text = [sessionBlock, errorBlock, cueBlock].filter((part) => part !== '').join('\n\n');
-  return { text, sessionBlock, errorBlock, cueBlock, injectedCount, limit };
+  return { text, sessionBlock, errorBlock, cueBlock, injectedCount, injectableCount: injectable.length, limit };
 }
 
 /**
@@ -654,6 +690,21 @@ function currentState(configLimit, { migrating = false } = {}) {
     exportToPrompt: state.exportToPrompt,
 
     /*
+     * What the assembler requires and what it merely recommends.
+     *
+     * The panel flags an over-long lesson and an entry that is skipped for having no
+     * lesson. Both thresholds are projected from here rather than repeated in the
+     * browser: a panel that hard-coded "40" would keep flagging entries at the old
+     * number after the cue told the model a different one.
+     */
+    advice: {
+      // Recommended ceiling for a lesson; longer is stored and injected anyway.
+      lessonMax: LESSON_ADVICE_MAX,
+      // Hard ceiling for the incident, enforced by the parser.
+      incidentMax: MAX_INCIDENT_CHARS,
+    },
+
+    /*
      * Injection accounting, computed HERE rather than in the Client.
      *
      * The panel shows "N of M entries are being injected"; if the browser counted
@@ -667,7 +718,15 @@ function currentState(configLimit, { migrating = false } = {}) {
       sessionPromptActive: hasSession,
       globalPromptActive: globalPrompt.trim() !== '',
       errorsInjected: built.injectedCount,
+      /*
+       * How many entries COULD be injected (they have a lesson) versus how many exist.
+       * The difference is entries that are still just an incident with no rule
+       * extracted, and the panel names them for what they are instead of leaving the
+       * user to work out why a library of 14 injects at most 12.
+       */
+      errorsInjectable: built.injectableCount,
       errorsTotal: state.errors.length,
+      errorsWithoutLesson: state.errors.length - built.injectableCount,
       errorLimit: built.limit,
       errorLimitDefault: configLimit,
       errorLimitCustom: state.injectLimit,

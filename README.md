@@ -102,7 +102,8 @@ A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
 本次对话提示词、以及**最近 10 条**错误经验，通过 `ctx.systemPrompt.section()` 注入，顺序值 `10200`（`DEPLOYMENT_PERSONA_SUFFIX`），即排在工具文档之后。
 
 - `text` 传的是**函数**，所以改完**下一轮对话就生效**——不用重启，也不用重新注册。
-- 只注入**类型 + 教训**。存下来的 `detail` 解释了事情经过，但它是 token 最贵、最不具行动性的一项，所以只留在面板里。
+- 只注入**教训**。`detail` 解释了事情经过，`type` 是这次的事故标题——两者描述的都是**某一个瞬间**，只有碰上长得像的下一次任务才有用；而教训是一条能迁移的规则。`detail` 同时是 token 最贵的一项，所以两者都只留在面板里。
+- **没有教训的条目不注入**，面板里会标出来让你补。它不占注入条数的额度——上限数的是"真正注入的条数"，所以先筛掉再取最近 N 条。
 - 条数上限是为了不让经验库变成 token 黑洞：完整列表始终在面板里可读，提示词里也会说明当前只显示了其中一部分。
 
 ### 注入条数可以自己设
@@ -155,7 +156,7 @@ A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
 发现自身错误时，**必须**主动用下面这一行汇报：
 我犯了个错误：错误经过：<当时实际发生了什么> 教训：<以后怎么做，一句可执行的规则>
 两个标签缺一不可、顺序固定，且必须写在同一行；缺任一标签或换行都不会被捕获。分类由用户在面板里选。
-错误经过与教训都要简洁，各控制在 20 字以内。
+错误经过 20 字以内，只写这次发生了什么；教训 40 字以内，但要写成换任务、换文件也成立的规则，不提本次的文件名、路径、命令或具体数值。
 ```
 
 宿主半边监听助手的输出流，发现这个句式就把一条**草稿**放进面板顶部的「待确认」区，并在**错误库按钮上显示数字徽标**。草稿不会自动进库——必须点「采纳」；采纳前可以改措辞、选分类，或者直接「丢弃」。
@@ -166,7 +167,8 @@ A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
 - **`错误经过：` 与 `教训：` 是硬边界**，且顺序固定、必须在同一行。这是取代旧 `｜` 分隔符的关键改动：分隔符太容易在散文里被引用（曾有一句话里写着"（忘了写 `｜`）"，结果在错误的位置切开，产生了垃圾草稿），而两个标签很难被无意复现。
 - **必须写在同一行**：解析只看标记所在的那一行，所以「教训」换到下一行会**静默丢弃**——不会有任何报错，你也不会看到草稿。这是最容易踩的一条。
 - **旧格式不再捕获**：`我犯了个错误：xxx｜yyy`（用 `｜` 分隔、无标签）不会再产生草稿，请用双标签格式。
-- **20 字是建议，不是硬限制**。代码只校验「错误经过」在 4~200 字之间；教训没有长度校验。写超了照样会被捕获，只是注入了 token 会多一些。
+- **20 / 40 字都是建议，不是硬限制**。代码只校验「错误经过」在 4~200 字之间；教训没有长度校验。写超了照样会被捕获，只是注入了 token 会多一些——面板里会把超过 40 字的教训标出来。
+- **教训要写成可迁移的规则**。引导里明确要求"换任务、换文件也成立，不提本次的文件名、路径、命令或具体数值"，因为注入的是**教训**而不是事情经过：带具体文件名、具体命令的句子，只有下一次恰好同名时才用得上，而下一次几乎总是不同的文件。
 - 一条消息**最多产生一条草稿**（取最先解析成功的那一处）；同一句话重复出现只算一次；队列上限 20 条，旧的先丢。
 - 捕获到的内容若带尖括号（模型把模板本身回显出来）、以代码标点开头、或「错误经过」短于 4 字 / 长于 200 字，都会被**直接丢弃**——否则会记下"错误经过 = `<当时实际发生了什么>`"这类垃圾。
 
@@ -343,7 +345,8 @@ Writes are atomic (`.tmp` sibling + rename), so a crash cannot truncate your pro
 The session prompt and the **most recent 10** error entries are contributed through `ctx.systemPrompt.section()` at order `10200` (`DEPLOYMENT_PERSONA_SUFFIX`), i.e. after the tool documentation.
 
 - `text` is a **function**, so an edit takes effect on the next turn — no restart, no re-registration.
-- Only **type + lesson** is injected. The stored `detail` explains the incident but is the most token-expensive and least actionable field, so it stays in the panel.
+- Only the **lesson** is injected. The stored `detail` explains the incident and `type` is its headline — both describe one moment, and only a lesson states a rule that transfers to the next task. `detail` is also the most token-expensive field, so both stay in the panel.
+- Entries **without a lesson are skipped**, and the panel marks them so you can fill one in. They do not consume the cap: the limit counts what is really injected, so the filter runs first.
 - The cap keeps the library from becoming a token sink: the full list stays readable in the panel, and the prompt says when it is showing a subset.
 
 ### The number of injected entries is yours to set
@@ -396,7 +399,7 @@ With export enabled, the plugin appends a fixed **confession cue** to the system
 发现自身错误时，**必须**主动用下面这一行汇报：
 我犯了个错误：错误经过：<当时实际发生了什么> 教训：<以后怎么做，一句可执行的规则>
 两个标签缺一不可、顺序固定，且必须写在同一行；缺任一标签或换行都不会被捕获。分类由用户在面板里选。
-错误经过与教训都要简洁，各控制在 20 字以内。
+错误经过 20 字以内，只写这次发生了什么；教训 40 字以内，但要写成换任务、换文件也成立的规则，不提本次的文件名、路径、命令或具体数值。
 ```
 
 The Host watches the assistant's output stream; on seeing that phrasing it puts a **draft** into the 待确认 queue at the top of the panel and shows a **count badge on the 错误库 button**. A draft never enters the library by itself — you press 采纳, and you may rewrite the wording and pick a category first, or discard it.
@@ -407,7 +410,9 @@ The Host watches the assistant's output stream; on seeing that phrasing it puts 
 - **`错误经过：` and `教训：` are hard boundaries**, and their order is fixed and must be on one line. This is what replaced the old `｜` separator: a separator character gets quoted in prose (one real sentence contained "（忘了写 `｜`）", which split in the wrong place and produced two junk drafts), while two labels are very hard to reproduce by accident.
 - **The whole confession must be on one line.** The parser only reads the line the marker sits on, so a lesson moved to the next line is **dropped silently** — no error, and no draft for you to see. This is the easiest rule to trip over.
 - **The old format is no longer captured**: `我犯了个错误：xxx｜yyy` (separator, no labels) produces no draft. Use the two-label format.
-- **The 20-character limit is guidance, not enforcement.** The code only checks the incident is 4–200 characters; the lesson has no length check at all. Writing longer still gets captured — it just costs more tokens once injected.
+- **Both the 20 and the 40 are guidance, not enforcement.** The code only checks the incident is 4–200 characters; the lesson has no length check at all. Writing longer still gets captured — it just costs more tokens once injected, and the panel flags a lesson past 40.
+- **A lesson has to be a rule that travels.** The cue asks for wording that holds "across tasks and files, without naming this task's file, path, command or numbers", because what gets injected is the **lesson**, not the incident: a sentence carrying a specific filename or command only pays off if the next task happens to involve that same file, and it usually does not.
+- **An entry without a lesson is not injected at all**, and the panel marks it so you can fill one in. It does not consume the cap either: the limit counts entries that are really injected, so the filter runs before the most-recent-N slice.
 - One message yields **at most one draft** (the first occurrence that parses); the same sentence repeating counts once; the queue is capped at 20, oldest dropped.
 - A capture is **dropped** when it contains angle brackets (the model echoing the template itself), begins with code punctuation, or has an incident field shorter than 4 or longer than 200 characters — otherwise it would record an entry whose incident is literally `<当时实际发生了什么>`.
 

@@ -33,7 +33,7 @@ window.__ModuleLoader__.load({
      * version ahead of the other. Saying so outright is better than defending every
      * field against an older peer. Bump it with package.json.
      */
-    const CLIENT_VERSION = '1.1.3';
+    const CLIENT_VERSION = '1.2.0';
 
     /** Badge poll interval; the header badge must stay current with both panels shut. */
     const POLL_MS = 10000;
@@ -810,6 +810,9 @@ window.__ModuleLoader__.load({
       const [category, setCategory] = React.useState(draft.category || OTHER);
       const [busy, setBusy] = React.useState(false);
 
+      /** Host-declared advice, so the hint here matches what the cue told the model. */
+      const advice = props.advice || { lessonMax: 40 };
+
       const accept = () => {
         setBusy(true);
         props.onAccept(draft.id, { type, lesson, category }).then(() => setBusy(false));
@@ -831,10 +834,18 @@ window.__ModuleLoader__.load({
         h('input', {
           className: 'pd-area',
           style: { minHeight: 'auto', marginTop: '4px' },
-          placeholder: '以后怎么避免（一句教训）',
+          placeholder: '以后怎么避免（一句可迁移的教训）',
           value: lesson,
           onChange: (e) => setLesson(e.target.value),
         }),
+        /*
+         * A live count, not a validation: the lesson has no hard limit, and cutting a
+         * confession off at 40 characters would throw away the very thing the entry
+         * exists for. Showing the number is enough to make the trade visible.
+         */
+        h('div', { className: 'pd-err-date', style: { marginTop: '2px' } },
+          '教训 ' + (lesson || '').trim().length + ' / 建议 ' + advice.lessonMax + ' 字'
+          + ((lesson || '').trim().length > advice.lessonMax ? '（超出，仍会保存）' : '')),
         h('div', { className: 'pd-inline' },
           h('span', { className: 'pd-note' }, '分类'),
           h(CategorySelect, { categories: props.categories, value: category, onChange: setCategory }),
@@ -887,8 +898,24 @@ window.__ModuleLoader__.load({
       const defaultLimit = injection === null
         ? 10
         : (injection.errorLimitDefault === undefined ? injection.errorLimit : injection.errorLimitDefault);
+      /*
+       * How many entries are actually eligible for injection. An older Host has no
+       * `errorsInjectable`; falling back to `errorsTotal` reproduces the old (slightly
+       * wrong) denominator for that one load instead of rendering "undefined 条".
+       */
+      const injectionTotal = injection === null
+        ? 0
+        : (injection.errorsInjectable === undefined ? injection.errorsTotal : injection.errorsInjectable);
       /** Host-declared bounds, so the field cannot drift from what the assembler allows. */
       const bounds = (data && data.limitBounds) || { min: 0, max: 200 };
+
+      /*
+       * The Host's guidance thresholds, for the same reason as `bounds`: the panel
+       * flags an over-long lesson, and it must flag it at the number the cue actually
+       * told the model (40) rather than at a second copy in this file. `advice` is
+       * absent only in the window where an older Host is talking to this bundle.
+       */
+      const advice = (data && data.advice) || { lessonMax: 40, incidentMax: 200 };
 
       // Seed the field from the value actually in force, so what the user reads there
       // is what the prompt assembler is using — not what they last typed.
@@ -996,6 +1023,7 @@ window.__ModuleLoader__.load({
               key: draft.id,
               draft,
               categories,
+              advice,
               onAccept: acceptDraft,
               onDiscard: discardDraft,
             })),
@@ -1016,6 +1044,11 @@ window.__ModuleLoader__.load({
            * library has entries" and "the library is actually reaching the model" —
            * the second is the whole point, and without a readout a user cannot tell
            * the two apart.
+           *
+           * The denominator is the INJECTABLE count, not the library size: entries
+           * with no lesson cannot be injected at all, and counting them would make
+           * "10 of 14" read as truncation when the real answer is "10 of 12, plus two
+           * that need a lesson before they count".
            */
           injection !== null && errors.length > 0 ? h('div', {
             className: 'pd-note', style: { marginTop: '10px' },
@@ -1024,9 +1057,14 @@ window.__ModuleLoader__.load({
               ? '已用 /lessons off 暂停注入（输入 /lessons on 恢复；重载后自动复位）'
               : (injection.exportToPrompt === false
                 ? '错误库导出已关闭，暂不注入（可在「提示词」面板重新开启）'
-                : (injection.errorsInjected === injection.errorsTotal
+                : (injection.errorsInjected === injectionTotal
                   ? '已注入全部 ' + injection.errorsInjected + ' 条（下一轮对话生效）'
-                  : '已注入最近 ' + injection.errorsInjected + ' 条，共 ' + injection.errorsTotal + ' 条（下一轮对话生效）'))) : null,
+                  : '已注入最近 ' + injection.errorsInjected + ' 条，共 ' + injectionTotal + ' 条（下一轮对话生效）')),
+            injection.errorsWithoutLesson > 0
+              ? h('div', { className: 'pd-err-date', style: { marginTop: '4px' } },
+                '另有 ' + injection.errorsWithoutLesson
+                + ' 条还没写教训，不会被注入——补上教训就会自动进入上面的统计。')
+              : null) : null,
 
           /*
            * The cap is editable here, not only in Settings: it is the number that
@@ -1083,27 +1121,53 @@ window.__ModuleLoader__.load({
             group.note ? h('span', { className: 'pd-chip' }, group.note) : null,
             h('span', { className: 'pd-count' }, '（' + group.entries.length + '）')),
 
-            collapsed[group.id] ? null : group.entries.map((entry) => h('div', {
-              className: 'pd-err', key: entry.id,
-            },
-              h('div', { className: 'pd-err-type' }, entry.type || '(未命名)'),
-              h('div', null, entry.lesson || ''),
-              // The stored `detail` is what the one-sentence lesson was distilled
-              // from. It is deliberately not injected into the prompt (that would
-              // cost the tokens the lesson exists to save) but is worth keeping
-              // readable here, so it renders as a muted note when present.
-              entry.detail ? h('div', { className: 'pd-err-date' }, entry.detail) : null,
-              h('div', { className: 'pd-inline' },
-                h('span', { className: 'pd-err-date' }, (entry.date || '') + ' · ' + categoryLabel(categories, entry.category)),
-                h(CategorySelect, {
-                  categories,
-                  value: entry.category,
-                  onChange: (value) => setCategory(entry.id, value),
-                }),
-                h('button', {
-                  type: 'button', className: 'pd-ghost',
-                  onClick: () => removeAt(entry.id),
-                }, '删除')))))),
+            collapsed[group.id] ? null : group.entries.map((entry) => {
+              /*
+               * Two per-entry conditions matter to the user because they change what
+               * the model actually receives:
+               *
+               *   · no lesson — this entry is NOT injected at all (only the lesson is
+               *     injected), so it is worth naming why it is invisible up there;
+               *   · lesson past the advised length — still injected, but it costs the
+               *     most tokens of anything in the block, and the cue told the model
+               *     40. Both thresholds come from the Host via `advice`.
+               *
+               * The emptiness test is `trim() === ''`, byte-for-byte the predicate the
+               * assembler filters on, so the badge cannot disagree with the block.
+               */
+              const lessonText = (entry.lesson || '').trim();
+              const noLesson = lessonText === '';
+              const overLong = !noLesson && lessonText.length > advice.lessonMax;
+              return h('div', {
+                className: 'pd-err', key: entry.id,
+              },
+                h('div', { className: 'pd-err-type' }, entry.type || '(未命名)'),
+                h('div', null, entry.lesson || ''),
+                noLesson
+                  ? h('div', { className: 'pd-err-date' },
+                    '这条没有教训，不会被注入——补上教训后才会出现在系统提示词里。')
+                  : (overLong
+                    ? h('div', { className: 'pd-err-date' },
+                      '教训 ' + lessonText.length + ' 字，超过建议的 ' + advice.lessonMax
+                      + ' 字。仍会注入，但每轮都要付这份 token；换成一句不依赖本次情境的规则可以更省。')
+                    : null),
+                // The stored `detail` is what the one-sentence lesson was distilled
+                // from. It is deliberately not injected into the prompt (that would
+                // cost the tokens the lesson exists to save) but is worth keeping
+                // readable here, so it renders as a muted note when present.
+                entry.detail ? h('div', { className: 'pd-err-date' }, entry.detail) : null,
+                h('div', { className: 'pd-inline' },
+                  h('span', { className: 'pd-err-date' }, (entry.date || '') + ' · ' + categoryLabel(categories, entry.category)),
+                  h(CategorySelect, {
+                    categories,
+                    value: entry.category,
+                    onChange: (value) => setCategory(entry.id, value),
+                  }),
+                  h('button', {
+                    type: 'button', className: 'pd-ghost',
+                    onClick: () => removeAt(entry.id),
+                  }, '删除')));
+            }))),
 
           /*
            * Manual entry, behind a disclosure.
@@ -1127,9 +1191,12 @@ window.__ModuleLoader__.load({
             }),
             h('input', {
               className: 'pd-area', style: { minHeight: 'auto', marginTop: '6px' },
-              placeholder: '一句教训，如：声称完成前先独立复核产物存在',
+              placeholder: '一句可迁移的教训，如：声称完成前先独立复核产物存在',
               value: manualLesson, onChange: (e) => setManualLesson(e.target.value),
             }),
+            h('div', { className: 'pd-err-date', style: { marginTop: '2px' } },
+              '教训 ' + manualLesson.trim().length + ' / 建议 ' + advice.lessonMax
+              + ' 字；留空的话这条不会注入（注入的只有教训）。'),
             h('div', { className: 'pd-row' },
               h('button', { type: 'button', className: 'pd-primary', onClick: addManual }, '添加'),
               h('span', { className: 'pd-note' }, '新条目先落在「其他」，可在上面用下拉框归档'))) : null,
