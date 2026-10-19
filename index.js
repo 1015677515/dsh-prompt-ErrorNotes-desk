@@ -82,7 +82,7 @@ const MAX_INJECT_LIMIT = 200;
  * the other. Publishing this lets the panel say so outright instead of defending
  * every field against an older peer. Bump it with package.json.
  */
-const PLUGIN_VERSION = '1.2.0';
+const PLUGIN_VERSION = '1.2.1';
 
 /**
  * Current on-disk state shape.

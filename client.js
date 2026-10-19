@@ -33,7 +33,7 @@ window.__ModuleLoader__.load({
      * version ahead of the other. Saying so outright is better than defending every
      * field against an older peer. Bump it with package.json.
      */
-    const CLIENT_VERSION = '1.2.0';
+    const CLIENT_VERSION = '1.2.1';
 
     /** Badge poll interval; the header badge must stay current with both panels shut. */
     const POLL_MS = 10000;

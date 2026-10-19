@@ -4,6 +4,30 @@ Notable changes to `dsh-prompt-ErrorNotes-desk`. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versioning follows
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] — 2026-10-19
+
+### Added
+
+- **仓库里放了一份作者自用的全局提示词 `AGENTS.example.md`，纯当写法参考。**
+  插件解决的是"把教训喂回去"，但用户最先问的往往是更靠前的一步：**全局提示词该
+  怎么写**。所以把作者自己那份公开出来——它可以当范例读，看一眼别人怎么把"先自检
+  再交付""删除前报范围"这类要求压缩成一条可执行的规则。
+
+  **它不会被套用，安装插件也不会碰你的 `AGENTS.md`。** 这两件事都写进了 README 和
+  INSTALL 的中英两段，因为它们是最容易被误解的地方。技术上也不存在套用路径：代码里
+  唯一写 `AGENTS.md` 的是 `applyPatch` 里那行 `writeTextFile(globalPromptPath(), …)`
+  （`index.js:827`），只在用户按「保存」时触发，写的是用户框里的内容；启动、安装、
+  `apply()` 都不写。
+
+  名字用 `AGENTS.example.md` 而不是 `AGENTS.md` 是刻意的：宿主
+  `dsh-agent-instructions` 的项目指令候选是**精确文件名匹配**
+  （`AGENTS.md` / `CLAUDE.md` / `AGENTS.local.md` / `CLAUDE.local.md`），且以 `.git`
+  标记项目根。所以若把它命名为 `AGENTS.md` 放在仓库根，**任何人把这个仓库当工作区
+  打开，它都会被当作项目指令自动读进上下文**——那正是"参考"的反面。加 `.example`
+  一个后缀就落到了候选名单之外。
+
+  也没有做"一键导入"按钮，同样是刻意的：那种功能的定义就是覆盖别人的提示词。
+
 ## [1.2.0] — 2026-10-19
 
 ### Changed

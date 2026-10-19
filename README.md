@@ -97,6 +97,26 @@ A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
 
 写入是**原子**的（先写 `.tmp` 再改名），崩溃不会截断你的提示词。浏览器半边完全不碰文件系统——所有读写都在宿主半边，所以不会写到 `$DSH_HOME` 之外。
 
+### 作者自用的提示词（仅供参考，不会被套用）
+
+仓库根目录有一份 [`AGENTS.example.md`](AGENTS.example.md)，是插件作者自己正在用的全局提示词原文，公开出来纯粹当**写法参考**：你可以看看别人是怎么把"先自检再交付""删除前报范围"这类要求写清楚、写短的，然后照着改自己的。
+
+**它不会覆盖你的提示词，装插件也不会。** 说清楚以免误会：
+
+- 安装插件不会写入你的 `AGENTS.md`。代码里唯一会写这个文件的地方是你在面板里点「保存」的那一刻，写的是**你自己输入框里的内容**，不是这个样例。
+- 这个文件叫 `AGENTS.example.md`，不是 `AGENTS.md`，也没有放在会被自动加载的位置。DSH 的项目指令加载器只认 `AGENTS.md` / `CLAUDE.md` / `AGENTS.local.md` / `CLAUDE.local.md` 这几个**精确文件名**，`AGENTS.example.md` 不在名单里——哪怕你把这个仓库当工作区打开，它也不会被当成指令读进去。
+- 没有"一键导入"按钮，这是有意为之：任何"帮你应用这份提示词"的功能，都是在覆盖你。
+
+想用的话自己动手，最稳的方式是**先备份再合并**：
+
+```powershell
+# DSH_HOME 没设置时插件用的是 ~/.dsh，这里跟着它走
+$dsh = if ($env:DSH_HOME) { $env:DSH_HOME } else { Join-Path $HOME '.dsh' }
+Copy-Item "$dsh\AGENTS.md" "$dsh\AGENTS.md.bak"
+```
+
+然后打开 `$DSH_HOME/AGENTS.md`（也就是插件面板里的"全局提示词"框），挑你需要的那几条粘进去。直接整份覆盖也可以，但那会丢掉你原有的规则——**你的提示词应该长成你自己的样子，别人的只能当参考。**
+
 ## 注入是怎么工作的
 
 本次对话提示词、以及**最近 10 条**错误经验，通过 `ctx.systemPrompt.section()` 注入，顺序值 `10200`（`DEPLOYMENT_PERSONA_SUFFIX`），即排在工具文档之后。
@@ -339,6 +359,26 @@ The global prompt **is** the harness's own `$DSH_HOME/AGENTS.md` — the same fi
 | Session prompt, error library, panel visibility | `$DSH_HOME/prompt-desk/state.json` |
 
 Writes are atomic (`.tmp` sibling + rename), so a crash cannot truncate your prompt. The browser half never touches the filesystem — all I/O lives on the host half, so nothing can write outside `$DSH_HOME`.
+
+### The author's own prompt (reference only — never applied for you)
+
+The repository root carries [`AGENTS.example.md`](AGENTS.example.md), the author's own global prompt verbatim, published purely as a **reference for how to write one**: see how a working prompt states "self-check before delivering" or "report the scope before deleting" tightly and briefly, then write yours in the same spirit.
+
+**It does not overwrite your prompt, and installing the plugin does not either.** To be explicit about it:
+
+- Installing the plugin never writes your `AGENTS.md`. The only place in the code that writes this file is the moment you press "Save" in the panel, and what it writes is **what you typed in the box**, not this example.
+- The file is named `AGENTS.example.md`, not `AGENTS.md`, and it does not sit anywhere that gets auto-loaded. The harness project-instruction loader matches only the exact file names `AGENTS.md` / `CLAUDE.md` / `AGENTS.local.md` / `CLAUDE.local.md`; `AGENTS.example.md` is not among them — even if you open this repository as your workspace, it is never read as instructions.
+- There is no "import in one click" button, deliberately: anything that "applies this prompt for you" is, by definition, overwriting yours.
+
+To adopt any of it, do it by hand — and back up first, then merge:
+
+```powershell
+# This plugin falls back to ~/.dsh when DSH_HOME is unset, so mirror that here
+$dsh = if ($env:DSH_HOME) { $env:DSH_HOME } else { Join-Path $HOME '.dsh' }
+Copy-Item "$dsh\AGENTS.md" "$dsh\AGENTS.md.bak"
+```
+
+Then open `$DSH_HOME/AGENTS.md` (the "global prompt" box in the panel) and paste in the rules you want. Overwriting it wholesale is possible too, but that throws away rules you already had — **your prompt should look like yours; someone else's is only a reference.**
 
 ## How the injection works
 
