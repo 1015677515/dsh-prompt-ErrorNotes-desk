@@ -99,7 +99,7 @@ A:\大肥鱼工作区\dsh-prompt-ErrorNotes-desk
 
 ### 作者自用的提示词（仅供参考，不会被套用）
 
-仓库根目录有一份 [`AGENTS.example.md`](AGENTS.example.md)，是插件作者自己正在用的全局提示词原文，公开出来纯粹当**写法参考**：你可以看看别人是怎么把"先自检再交付""删除前报范围"这类要求写清楚、写短的，然后照着改自己的。
+仓库根目录有一份 [`AGENTS.example.md`](AGENTS.example.md)，是插件作者自己正在用的全局提示词原文，公开出来纯粹当**写法参考**：你可以看看别人怎么分节组织、怎么把"先自检再交付""删除前报范围"这类要求写成一条能照着执行的话，然后照自己的习惯改。
 
 **它不会覆盖你的提示词，装插件也不会。** 说清楚以免误会：
 
@@ -362,7 +362,7 @@ Writes are atomic (`.tmp` sibling + rename), so a crash cannot truncate your pro
 
 ### The author's own prompt (reference only — never applied for you)
 
-The repository root carries [`AGENTS.example.md`](AGENTS.example.md), the author's own global prompt verbatim, published purely as a **reference for how to write one**: see how a working prompt states "self-check before delivering" or "report the scope before deleting" tightly and briefly, then write yours in the same spirit.
+The repository root carries [`AGENTS.example.md`](AGENTS.example.md), the author's own global prompt verbatim, published purely as a **reference for how to write one**: see how a working prompt groups its rules into sections and states "self-check before delivering" or "report the scope before deleting" as a line you can actually act on, then rewrite it in your own style.
 
 **It does not overwrite your prompt, and installing the plugin does not either.** To be explicit about it:
 
